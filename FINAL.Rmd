@@ -1,0 +1,2016 @@
+---
+title: "Predictores de sangrado en tromboembolismo de pulmón"
+author: "Maico Bernal, Gonzalo Ralón, Victoria Vernengo Lezica"
+date: "21/6/2021"
+output:
+  html_document:
+    toc: yes
+    df_print: paged
+  html_notebook:
+    toc: yes
+    toc_float: yes
+    theme: lumen
+  pdf_document:
+    toc: yes
+subtitle: Trabajo Final CEECS - Taller
+---
+```{=html}
+<style>
+body {
+text-align: justify}
+</style>
+```
+# *BASE DE DATOS*
+## 1) **Preparación de los datos** (I)
+### a) Lectura del dataset y su estructura
+```{r include=FALSE}
+#Se sugiere descarga de objetos en memoria.
+#rm(list = ls())
+
+#Librerías a cargar
+library(sjPlot)
+library(sjmisc)
+library(purrr)
+library(sjlabelled)
+library(tidymodels)
+library(arsenal)
+library(boot)
+library(broom)
+library(car)
+library(caret)
+library(corrplot)
+library(corrr)
+library(data.table)
+library(dplyr)
+library(emmeans)
+library(epiDisplay)
+library(epiR)
+library(fBasics)
+library(foreach)
+library(foreign)
+library(GGally)
+library(ggplot2)
+library(ggpubr)
+library(glmmTMB)
+library(glmnet)
+library(gridExtra) 
+library(InformationValue)
+library(kableExtra)
+library(knitr)
+library(lattice)
+library(lmerTest)
+library(mice)
+library(naniar)
+library(nlme)
+library(pROC)
+library(questionr)
+library(randomForest)
+library(readxl)
+library(reshape2)
+library(ResourceSelection)
+library(rlist)
+library(rmarkdown)
+library(Rmisc)
+library(tableone)
+library(tidyr)
+library(tidyverse)
+library(VIM)
+library(visdat)
+
+options(scipen = 999)
+```
+
+````{r}
+#Exportamos la base
+base <- read_excel("base_corregida_final.xlsx")
+
+#creamos una variable con todos los nombres para futuras referencias:
+nombres <- c("Pac_Sex", "Pac_Edad", "Pac_Cobertura", "Pac_HTA", "Pac_DBT", "Pac_TBQ", "Pac_DLP", "Pac_ICC", "Pac_FA", "Pac_ETVpre", "Pac_TEPpre", "Pac_TEP_previo_menor_3_meses", "Pac_Deamb", "Pac_Reposo", "Pac_EPOC", "Pac_ACVglobal", "Pac_Hemorragia_Previa_Mayor_Todas", "Pac_Hemorragia_Previa_Mayor_Reciente", "Pac_EnfAuto", "Pac_IRCglobal", "Pac_SmeProcoag", "PESI_Cancer", "Pac_ACO_Previa", "IMC", "MotInt", "PESI_Det_Sens", "CC_Horas_Sx_Admision", "CC_FC_Ingreso", "PESI_Taquicardia", "CC_TAS_Ingreso", "PESI_Hipotension", "CC_FR_Ingreso", "PESI_Taquipnea", "PESI_Hipotermia", "CC_SaO_Ingreso", "CC_SaO90", "Wells", "PESIcalc", "PESI_clasif", "PESIsCalc", "PESIs_Clasif", "Pac_Cx_Total", "Lab_Hto", "Lab_Hb", "Lab_GB", "Lab_Cr", "Lab_Plaq", "Biomarc_pos", "ECOTT_FSVI", "ECOTT_TAPSE", "ECOTT_PSAP", "ECOTT_DisfVD", "Alta_Carga_Trombo_TAC", "Int_O_Alto_Riesgo_Calc", "EstRiesgo", "ServicioCargo", "RIETE_Calc", "RIETE_Grupo", "HASBLED", "ACOint", "FVCI", "Tto_Reperf", "TL_cual", "Compl_Sang_Todos", "Compl_SoporteHD_NO", "Alta_Tto_TiposACO", "DOAC_si_vs_no")
+
+#ordenamos su estructura
+base[sapply(base, is.character)] <- lapply(base[sapply(base, is.character)], as.factor)
+
+```
+
+> -  De una muestra original de `r dim(base)[1]` pacientes internados por tener complicaciones tromboembólicas, se registraron, en primera instancia, 322 variables.<br>
+Esas variables referían a: características sociales y demográficas; aspectos de sus historias clínicas; características clínicas registradas en el momento de ingreso nosocomial; resultados de estudios complementarios realizados durante el período de internación --que incluyen imágenes y bioindicadores de laboratorio-; indicadores de estado en el momento del alta; prescripciones para tratamiento preventivo; indicadores de seguimiento a los 30 días (*¿pautas de alarma?*).
+Otras variables incluidas consisten en un conjunto de índices compuestos relacionados con la estimación de riesgos diversos: Registro Informatizado de Pacientes con Enfermedad Trombo Embólica (RIETE); Índice de Wells para Trombosis Venosa Profunda (TVP - Wells); Índice de Severidad para el Embolismo Pulmonar (Pulmonary Embolism Severity Index, PESI); y una escala de Estratificación pronóstica y tratamiento de la tromboembolia pulmonar en fase aguda (EstRiesgo). Se conservan estos índices para compararlos con las estimaciones multivariadas que puedan obtenerse con los datos fundamentales.<br>
+De ellas se seleccionaron `r dim(base)[2]` variables que presentan el contenido conceptual fundamental para el ajuste de un modelo explicativo centrado en el análisis multivariante de las probabilidades de sufrir episodios de sangrado. Las `r 322-dim(base)[2]` variables excluídas presentaban articulaciones lógicas o aritméticas de algunas de las `r dim(base)[2]` variables conservadas, de modo que se optó por concentrar el análisis en las dimensiones empíricas fundamentales.<br>
+Por último, se incluye la variable Compl_Sang_Todos última como variable que expresa el desenlace fundamental, y que se adopta como variable respuesta para los modelos de regresión: si el paciente sufrió algún tipo de sangrado como complicación del tratamiento anti coagulante y/o de reperfusión realizado. Incluye todos los sangrados de la clasificación BARC mayor o igual a II: sangrados que requieren atención médica o más<br>
+
+## 2) **Análisis de datos faltantes** (I)
+### a) Valores únicos y faltantes
+
+```{r}
+prop_miss(base)*100
+prop_miss(base$Compl_Sang_Todos)
+vis_dat(base) + ggtitle("Gráfico 1 - Valores perdidos según tipos de variables (n = 684)")
+# vis_miss(base) + ggtitle("Gráfico 2 - Porcentaje de valores perdidos o no registrados por variables (n = 684)") ### ¡ATENCIÓN! ### Saco este gráfico porque está más abajo como Gráfico 5.
+# Revisar si estoy nombrando bien las variables de agrupamiento.
+# Los gráficos 4, 5 y 6 permiten ver la distribución de valores perdidos en porcentajes de cada una de las variables. Estos gráficos son más ordenadores y hasta permitirían apreciar cuáles son las variables con más valores perdidos. Los gg_miss_var no permiten comparar las distribuciones porque las cantidades de UA con sangrados son siempre mucho menores.
+# gg_miss_var_cumsum(x = base) + ggtitle("Gráfico 3 - Valores perdidos acumulados por variables (n = 684)")
+gg_miss_fct(x = base, fct = Compl_Sang_Todos) + ggtitle("Gráfico 2 - Porcentajes de valores perdidos según desenlace de todos los tipos de sangrado (n = 684)")
+
+# ¡ATENCIÓN! # No se incluyen los gráficos que siguen porque como las UA con sangrado son siempre muchas menos, la comparación visual en términos absolutos pierde sentido.
+# gg_miss_var(x = base, fct = Compl_Sang_Todos)
+# gg_miss_var(base, facet = Compl_Sang_Interm)
+# gg_miss_var(base, facet = Compl_Sang_Mayor)
+
+# Relación con otras variables.
+aggr_plot <- aggr(base, col=c('cyan','red'), numbers=TRUE, sortVars=TRUE, labels=names(base), cex.axis=.7, gap=3, ylab=c("Gráfico 5 - Proporción de valores perdidos por variable (n = 684)","Gráfico 6 - Patrón de valores perdidos en la matriz de datos (n = 684)")) # Están muy buenos estos gráficos. Cambié el azul obscuro por cyan, que permite apreciar mejor la distribución por dato. Y le cambié el título porque, en verdad, el primero no sería un histograma: muestra la proporción de valores perdidos por variable, una junto a la otra. El segundo, en cambio, muestra cómo se distribuyen los valores perdidos por UA y por Variables. Quizá podamos dejar estos dos gráficos junto y sacar el que yo titulé 3.
+
+# Saco a los casos con faltantes
+bd_prueba <- na.omit(base)
+n_inicial <- nrow(base)
+n_final <- nrow(bd_prueba)
+(n_inicial- n_final)/n_inicial
+
+#Descriptiva segun si tiene o no faltantes
+base$miss.univ<-ifelse(!is.na(base$Compl_Sang_Todos), 0, 1)
+tab1_miss <- tableby(miss.univ ~ ., data = base)
+tab1_miss
+summary(tab1_miss)
+```
+> - La base contiene un `r prop_miss(base)*100` % de valores perdidos y/o no registrados. El Gráfico 1 muestra los valores perdidos por variable y según el tipo de variable: cualitativa o cuantitativa. Los Gráficos 2, 3 y 4 muestran los porcentajes de valores no registrados agrupados según desenlace de sangrado total, intermedio y mayor. En el Gráfico 5 se pueden apreciar las proporciones de valores perdidos por variables, y en el 6 el patrón general de distribución de los valores faltantes en la matriz de datos.<br>
+Sólo .... registros de la base estaban completos, de manera que al `r ((n_inicial- n_final)/n_inicial)*100` % de los registros les faltaba al menos un valor.<br>
+Tres variables concentran la mayor cantidad de valores faltantes: _ECOTT_PSAP_, con `r n_miss(base$ECOTT_PSAP)` valores perdidos, y _ECOTT_TAPSE_, con `r n_miss(base$ECOTT_TAPSE)` valores perdidos. Se trata de medidas de la función cardíaca por ecografía transtorácica. La variable _Biomarc_pos_, que registra marcadores positivos de enzimas cardíacas, muestra `r n_miss(base$Biomarc_pos)` valores faltantes. En menor medida, el tiempo de internación, variable _TiempoInt_, presenta `r n_miss(base$TiempoInt)` valores perdidos, y la medición de disfunción ventricular derecha por ecografía transtorácica, variable _ECOTT_DisfVD_, `r n_miss(base$ECOTT_DisfVD)` valores perdidos.<br>
+Esta magnitud de valores perdidos o faltantes justifica implementar mecanismos de imputación que impidan perder el `r (1-((n_inicial- n_final)/n_inicial))*100` % de los datos construidos en el trabajo de campo, que es el porcentaje de unidades de análisis con al menos un valor perdido.<br>
+
+### b) Matrix y gráficos de correlación
+
+> -   Se realiza el análisis de correlación entre las variables cuantitativas:
+
+```{r}
+# Chequeo cuales son las variables numéricas para poder calcular la matriz de correlación
+
+head(base)
+
+# Calculo matriz de correlación para los registros completos (omitiendo faltantes) con ambos métodos 
+# Pearson
+matriz.correl.pe <- base %>%  dplyr::select_if(is.numeric) %>%
+ correlate(use = "complete.obs", method = "pearson")
+
+#Armo tabla de correlación con método de Pearson 
+matriz.correl.pe%>%
+  shave() %>%
+  fashion() 
+
+# Spearman
+matriz.correl.sp <- base %>%  dplyr::select_if(is.numeric) %>%
+ correlate(use = "complete.obs", method = "spearman")
+
+#Armo tabla de correlación con método de Spearman
+matriz.correl.sp %>% 
+  shave() %>%   
+  fashion()
+
+#Grafico solo spearman ya que es el más robusto ante presencia de outliers
+matriz.correl.sp %>% rplot(colors = c("red", "blue"))
+
+```
+
+### c) Interpretación correlación
+
+-   Se observa solamente una gran asocicación positiva fuerte entre las variables hematorcrito, *Hto*, y hemoglobina, *Hb* con una correlación de 87%, lo cual tiene sentido ya que de la hemoglobina resulta el hemtocrito. En los modelos a estudiar tomaremos la decisión de utilizar Hb como variable, ya que es la variable utilizada en todos los scores.
+-   También se ve gran asociación positiva fuerte entre las variables *PESIcalc* y *PESI_Clasif*, ya que la clasificación se realiza desde el cálculo numérico de PESI. Se toma la decisión de dejar no la clasificación sino el cálculo de PESI (PESIcalc).
+
+## 3) **Preparación de los datos** (I)
+
+### a) Elimninación de la variables *Hto*, *PESI_clasif*, *PESIsCalc* y *PESIs_Clasif*
+
+> -   Se elimina la variable Hto por registrar correlación positiva fuerte con la variable Hb (0.87).
+Las otras variables se eliminan y se dejan solo los scores originales. 
+
+```{r}
+#Armo nuevo dataset excluyendo la variable Hto
+base_3 <- base %>%
+    dplyr::select(., -c(Lab_Hto, PESI_clasif, PESIsCalc, PESIs_Clasif, RIETE_Grupo))
+```
+
+### b) Imputación de los datos faltantes
+
+> -   Se decide imputar los datos datos faltantes, obteniendo 684 datos de las 66 variables elegidas.
+
+```{r}
+base_3[sapply(base_3, is.character)] <- lapply(base_3[sapply(base_3, is.character)], as.factor)
+
+base_imputada <- mice(base_3, m = 1,  defaultMethod = c("pmm", "logreg", "polyreg", "polr"), maxit = 5, printFlag = F)
+
+summary(base_imputada)
+
+densityplot(base_imputada)
+
+base_imp <- complete(base_imputada)
+
+n_miss(base_imp)
+```
+
+### c) Creación de nuevas variables de interés
+
+> - Se crea la variable de clearence de creatinina con formula de Cockcroft Gault. Creamos la variable edad >75 años para explorar si es predictor de sangrado. Es una variable que se incluye en el score de RIETE y plaquetas <100.000 a modo exploratorio. 
+
+``` {r}
+base_imp$ClCr <- ((140 - base_imp$Pac_Edad) * base_imp$Peso) / (72 * base_imp$Lab_Cr)
+base_imp$ClCr <- ifelse (base_imp$Pac_Sex == "Femenino", base_imp$ClCr*0.85, base_imp$ClCr)
+summary(base_imp$ClCr)
+
+base_imp$Pac_Edad_Corte <- ifelse (base_imp$Pac_Edad >= 75, "Si", "No")
+base_imp$Lab_Plaq_Corte <- ifelse (base_imp$Lab_Plaq >= 100000, "Si", "No")
+
+base_imp$TEP_motivo_int <- ifelse (base_imp$MotInt == "TEP", "Si", "No")
+
+base_backup <- base_imp
+```
+# *ANALISIS EXPLORATORIO*
+## 4) **Analisis exploratorios** (II)
+
+### a) Tablas descriptivas de las variables cuantitativas:
+
+```{r}
+
+#TABLA 1
+#Tabla resumen cuantitativas con media/SD, mediana/IQ
+resumen_cuant <- round(basicStats(base_imp[,c("Pac_Edad","CC_TAS_Ingreso", "CC_FC_Ingreso", "Wells", "PESIcalc", "RIETE_Calc", "Lab_Hb", "Lab_Cr", "Lab_Plaq", "ECOTT_TAPSE", "ECOTT_PSAP", "TiempoInt")]), digits = 2)
+kbl(resumen_cuant, digits = 1,caption= "Tabla resumen - Variables cuantitativas" )%>%
+  kable_paper("hover", full_width = T)
+
+```
+
+### b) Tabla 1 - Tabla resumen global
+
+```{r}
+
+#Tabla 1 - Resumen global
+myvars_tab1 <- names(base_imp)
+mycat_tab1 <- c("Pac_Sex", "Pac_Cobertura", "Pac_HTA", "Pac_DBT", "Pac_TBQ", "Pac_DLP", "Pac_ICC", "Pac_FA", "Pac_ETVpre", "Pac_TEPpre", "Pac_TEP_previo_menor_3_meses", "Pac_Deamb", "Pac_Reposo", "Pac_EPOC", "Pac_ACVglobal", "Pac_Hemorragia_Previa_Mayor_Todas", "Pac_Hemorragia_Previa_Mayor_Reciente", "Pac_EnfAuto", "Pac_IRCglobal", "Pac_SmeProcoag", "PESI_Cancer", "Pac_ACO_Previa", "MotInt", "PESI_Det_Sens", "PESI_Taquicardia","PESI_Hipotension", "PESI_Taquipnea", "PESI_Hipotermia", "CC_SaO90", "Pac_Cx_Total", "Biomarc_pos", "ECOTT_FSVI","ECOTT_DisfVD", "Alta_Carga_Trombo_TAC", "Int_O_Alto_Riesgo_Calc", "EstRiesgo", "ServicioCargo", "RIETE_Grupo", "ACOint", "FVCI", "Tto_Reperf", "TL_cual", "Compl_Sang_Todos", "Compl_Sang_Mayor", "Compl_Sang_Interm", "Compl_SoporteHD_NO", "Alta_Tto_TiposACO", "DOAC_si_vs_no")
+
+no_normal <- c("Pac_Edad","CC_TAS_Ingreso", "CC_FC_Ingreso", "Wells", "PESIcalc", "RIETE_Calc", "Lab_Hb", "Lab_Cr", "Lab_Plaq", "ECOTT_TAPSE", "ECOTT_PSAP", "TiempoInt", "ClCr", "Peso", "CC_Horas_Sx_Admision",  "Lab_GB", "CC_SaO_Ingreso", "CC_FR_Ingreso")
+variable_rta <- "Compl_Sang_Todos"
+
+tab1 <- CreateTableOne(vars=myvars_tab1, data = base_imp, factorVars = mycat_tab1, includeNA = F, test = T)
+
+a_tab1 <- print(tab1,  quote = FALSE, noSpaces = TRUE, nonnormal = no_normal,
+                printToggle = FALSE, formatOptions = list(big.mark = ","))
+
+
+kbl(a_tab1, digits = 1, caption = " TABLA 1: Población general")%>%
+  kable_classic(full_width = F, html_font = "Cambria") #CAMBIA DISEÑO DE TABLA
+
+```
+
+### c) Tabla 2 - Según Complicación Sangrado - TODOS LOS SANGRADOS
+
+```{r}
+#TABLA 2 - SUBPOBLACIONES CON Y SIN COMPLICACION_SANGRADO
+myvars_tab2 <- names(base_imp)
+mycat_tab2 <- c("Pac_Sex", "Pac_Cobertura", "Pac_HTA", "Pac_DBT", "Pac_TBQ", "Pac_DLP", "Pac_ICC", "Pac_FA", "Pac_ETVpre", "Pac_TEPpre", "Pac_TEP_previo_menor_3_meses", "Pac_Deamb", "Pac_Reposo", "Pac_EPOC", "Pac_ACVglobal", "Pac_Hemorragia_Previa_Mayor_Todas", "Pac_Hemorragia_Previa_Mayor_Reciente", "Pac_EnfAuto", "Pac_IRCglobal", "Pac_SmeProcoag", "PESI_Cancer", "Pac_ACO_Previa", "MotInt", "PESI_Det_Sens", "PESI_Taquicardia","PESI_Hipotension", "PESI_Taquipnea", "PESI_Hipotermia", "CC_SaO90", "Pac_Cx_Total", "Biomarc_pos", "ECOTT_FSVI","ECOTT_DisfVD", "Alta_Carga_Trombo_TAC", "Int_O_Alto_Riesgo_Calc", "EstRiesgo", "ServicioCargo", "RIETE_Grupo", "ACOint", "FVCI", "Tto_Reperf", "TL_cual", "Compl_Sang_Todos", "Compl_Sang_Mayor", "Compl_Sang_Interm", "Compl_SoporteHD_NO", "Alta_Tto_TiposACO", "DOAC_si_vs_no")
+
+norm_test<-apply(base_imp[, c("Pac_Edad","CC_TAS_Ingreso", "CC_FC_Ingreso", "Wells", "PESIcalc", "RIETE_Calc", "Lab_Hb", "Lab_Cr", "Lab_Plaq", "ECOTT_TAPSE", "ECOTT_PSAP", "TiempoInt")], 2, function(x) shapiro.test(x)$p.value)
+norm_test
+
+options(digits=3, scipen = 999)
+
+no_normal <- c("Pac_Edad","CC_TAS_Ingreso", "CC_FC_Ingreso", "Wells", "PESIcalc", "RIETE_Calc", "Lab_Hb", "Lab_Cr", "Lab_Plaq", "ECOTT_TAPSE", "ECOTT_PSAP", "TiempoInt")
+variable_rta <- "Compl_Sang_Todos"
+
+tab2 <- CreateTableOne(vars = myvars_tab2, data = base_imp, factorVars = mycat_tab2, strata = variable_rta, includeNA = F, test = T)
+
+a_tab2 <- print(tab2,  quote = FALSE, noSpaces = TRUE,nonnormal = no_normal,
+                printToggle = FALSE, formatOptions = list(big.mark = ","))
+
+kbl(a_tab2, digits = 1, col.names = c( "Complicación Sangrado = No", "Complicación Sangrado = Si", "p-value", "test"), caption = " TABLA 2")%>%
+  kable_classic(full_width = F, html_font = "Cambria")
+
+```
+
+## 5) **Análisis de outliers** (I)
+
+### a) Boxplots de la variable *Compl_Sangrado* por variables consideradas clinicamente significativas:
+
+> -   A fin de detectar valores atípicos, se optó por efectuar scatterplots individuales para algunas variables clinicamente significativas agrupándolas según complicación de sangrado: edad, hemoglobina (Hb), recuento de plaquetas y score de PESI.
+
+```{r}
+#ANÁLISIS GRAFICO EXPLORATORIO según COMPLICACION_SANGRADO
+
+##Boxplot de Complicación de sangrado según RIETE calculado (RIETE_Calc)
+ggplot(base_imp, aes(x=Compl_Sang_Todos, y=RIETE_Calc, fill = Compl_Sang_Todos)) + 
+  geom_boxplot() + 
+  geom_jitter(shape=16, position=position_jitter(0.2))
+
+
+##Boxplot de Sexo según RIETE calculado (RIETE_Calc)
+ggplot(base_imp, aes(x=Pac_Sex, y=RIETE_Calc, fill = Pac_Sex)) + 
+  geom_boxplot() +
+  geom_jitter(shape=16, position=position_jitter(0.2))
+
+
+##Boxplot de Complicación de sangrado según hemoglobina (Hb)
+ggplot(base, aes(x=Compl_Sang_Todos, y=Lab_Hb, fill = Compl_Sang_Todos)) + 
+  geom_boxplot() +
+  geom_jitter(shape=16, position=position_jitter(0.2))
+
+
+##Boxplot de Complicación de sangrado según recuento de Plaquetas
+ggplot(base_imp, aes(x=Compl_Sang_Todos, y=Lab_Plaq, fill = Compl_Sang_Todos)) + 
+  geom_boxplot()
+
+
+##Boxplot de Complicación de sangrado según score de PESI calculado (PESI_Calc)
+ggplot(base_imp, aes(x=Compl_Sang_Todos, y=PESIcalc, fill = Compl_Sang_Todos)) + 
+  geom_boxplot()
+
+
+##Boxplot de Complicación de sangrado según Edad
+ggplot(base_imp, aes(x=Compl_Sang_Todos, y=Pac_Edad, fill = Compl_Sang_Todos)) + 
+  geom_boxplot() +
+  geom_jitter(shape=16, position=position_jitter(0.2))
+
+
+
+```
+
+> - Se observan outliers en tres variables: Lab_GB, Lab_Plaq y PESI_Calc. Específicamente, hay varios valores que superan el valor del tercer cuartil en Lab_Plaq, con individuos teniendo más de 450.000 plaquetas y varios pacientes que presentaron niveles atípicos de PESI (aproximadamente \>170), y un solo valor atípico menor al primer cuartil (\<25 de PESI).
+> - Además se ven algunso sujetos con muy alto valor de GB, por lo cual serán estudiados.
+
+```{r}
+max(base_imp$Lab_Plaq, na.rm = T)
+max(base_imp$PESIcalc)
+max(base_imp$Lab_GB)
+
+min((base_imp$PESIcalc))
+
+library(tidyverse)
+library(dplyr)
+
+atipicos_plaq <- base_imp %>% 
+  filter(Lab_Plaq >= 450000)
+
+atipicos_PESI<- base_imp %>% 
+    filter(PESIcalc >= 170) %>%
+    mutate(PESI = PESIcalc, Edad  = Pac_Edad, Sexo = Pac_Sex,
+            ICC = Pac_ICC, EPOC = Pac_EPOC, FC = CC_FC_Ingreso,
+            TAS = CC_TAS_Ingreso, FR = CC_FR_Ingreso, Sat02 = CC_SaO_Ingreso) %>%
+    dplyr::select(PESI, Edad, Sexo, ICC, EPOC, FC, TAS, FR, Sat02)
+
+atipicos_PESI2 <- base_imp %>% 
+    filter(PESIcalc == 16)
+
+atipicos_GB <- base_imp %>% 
+    filter(base_imp$Lab_GB >60000)
+
+
+```
+
+> -   Se tomaron en cuenta las valores outliers (mayores al Q3) aproximados de las variables, y se estudio el caso con PESIcalc igual a 16. No se observaron casos mal cargados ni con mucha influencia por lo tanto todos estos casos se consideraron válidos y quedarán en la base de datos.
+
+
+## 6) **Analisis univariado y analisis de sensibilidad**
+
+### a) Analisis univariado 
+
+> - Como primer método de análisis se elige la regresión logística univariada de todas las variables. Se utlizó un nivel de significancia de 0.2 para tener a la variable en consideración para un modelo logístico multiple.
+
+```{r}
+base_univ <- base_imp
+
+# Se convierte en factor la variable ICC
+base_univ$Pac_ICC <- as.factor (base_univ$Pac_ICC)
+summary(base_univ$Pac_ICC)
+
+#Se convierte variable *Compl_Sang_Todos en factor:
+
+logistic.display((glm(Compl_Sang_Todos ~ CC_FC_Ingreso, data = base_univ, family = binomial (link = logit))))#0.024
+logistic.display(glm(Compl_Sang_Todos ~ CC_TAS_Ingreso, data = base_univ, family = binomial (link = logit)))#0.008
+logistic.display(glm(Compl_Sang_Todos ~ CC_SaO_Ingreso, data = base_univ, family = binomial (link = logit)))#0.0009
+logistic.display(glm(Compl_Sang_Todos ~ Lab_Hb, data = base_univ, family = binomial (link = logit)))#0.02
+logistic.display(glm(Compl_Sang_Todos ~ Lab_GB, data = base_univ, family = binomial (link = logit)))#0.04
+logistic.display(glm(Compl_Sang_Todos ~ CC_TAS_Ingreso, data = base_univ, family = binomial (link = logit)))#0.008
+logistic.display(glm(Compl_Sang_Todos ~ CC_SaO_Ingreso, data = base_univ, family = binomial (link = logit)))#0.0009
+logistic.display(glm(Compl_Sang_Todos ~ PESIcalc, data = base_univ, family = binomial (link = logit)))#0.0004
+logistic.display(glm(Compl_Sang_Todos ~ Biomarc_pos, data = base_univ, family = binomial (link = logit)))#0.03
+logistic.display(glm(Compl_Sang_Todos ~ ECOTT_DisfVD, data = base_univ, family = binomial (link = logit)))#0.008
+
+base_univ$Compl_Sang_Todos <- as.factor(base_univ$Compl_Sang_Todos)
+
+summary(glm(Compl_Sang_Todos ~ Pac_ICC, data = base_univ, family = binomial (link = logit))) #0.13
+summary(glm(Compl_Sang_Todos ~ Pac_Deamb, data = base_univ, family = binomial (link = logit))) #0.10
+summary(glm(Compl_Sang_Todos ~ Pac_ACVglobal, data = base_univ, family = binomial (link = logit)))#0.04
+summary(glm(Compl_Sang_Todos ~ Pac_Hemorragia_Previa_Mayor_Todas, data = base_univ, family = binomial (link = logit)))#0.02
+summary(glm(Compl_Sang_Todos ~ Pac_EnfAuto, data = base_univ, family = binomial (link = logit))) #0.2
+summary(glm(Compl_Sang_Todos ~ Pac_IRCglobal, data = base_univ, family = binomial (link = logit)))#0.02
+summary(glm(Compl_Sang_Todos ~ Pac_SmeProcoag, data = base_univ, family = binomial (link = logit)))#0.22
+summary(glm(Compl_Sang_Todos ~ Pac_Cx_Total, data = base_univ, family = binomial (link = logit)))#0.02
+
+summary(glm(Compl_Sang_Todos ~ PESI_Det_Sens, data = base_univ, family = binomial (link = logit)))#0.003
+summary(glm(Compl_Sang_Todos ~ PESI_Taquicardia, data = base_univ, family = binomial (link = logit)))#0.015
+summary(glm(Compl_Sang_Todos ~ PESI_Hipotension, data = base_univ, family = binomial (link = logit)))#0.015
+summary(glm(Compl_Sang_Todos ~ PESI_Taquipnea, data = base_univ, family = binomial (link = logit)))#0.03
+summary(glm(Compl_Sang_Todos ~ PESI_Hipotermia, data = base_univ, family = binomial (link = logit)))
+
+summary(glm(Compl_Sang_Todos ~ CC_SaO90, data = base_univ, family = binomial (link = logit)))#0.05
+summary(glm(Compl_Sang_Todos ~ CC_Horas_Sx_Admision, data = base_univ, family = binomial (link = logit)))#0.12
+summary(glm(Compl_Sang_Todos ~ ECOTT_TAPSE, data = base_univ, family = binomial (link = logit)))#0.007
+summary(glm(Compl_Sang_Todos ~ ECOTT_PSAP, data = base_univ, family = binomial (link = logit)))#0.005
+
+
+summary(glm(Compl_Sang_Todos ~ Int_O_Alto_Riesgo_Calc, data = base_univ, family = binomial (link = logit)))#0.04
+summary(glm(Compl_Sang_Todos ~ EstRiesgo, data = base_univ, family = binomial (link = logit)))#SIG todos
+summary(glm(Compl_Sang_Todos ~ ServicioCargo, data = base_univ, family = binomial (link = logit)))#0.04
+summary(glm(Compl_Sang_Todos ~ FVCI, data = base_univ, family = binomial (link = logit)))#0.0000
+summary(glm(Compl_Sang_Todos ~ Tto_Reperf, data = base_univ, family = binomial (link = logit)))#0.003
+summary(glm(Compl_Sang_Todos ~ TL_cual, data = base_univ, family = binomial (link = logit)))#SIG dudoso
+summary(glm(Compl_Sang_Todos ~ Compl_SoporteHD_NO, data = base_univ, family = binomial (link = logit)))#00000
+summary(glm(Compl_Sang_Todos ~ Alta_Tto_TiposACO, data = base_univ, family = binomial (link = logit)))#SIG todos
+summary(glm(Compl_Sang_Todos ~ DOAC_si_vs_no, data = base_univ, family = binomial (link = logit)))#0.016
+summary(glm(Compl_Sang_Todos ~ Wells, data = base_univ, family = binomial (link = logit)))#0.005
+summary(glm(Compl_Sang_Todos ~ TiempoInt, data = base_univ, family = binomial (link = logit)))#0.01
+summary(glm(Compl_Sang_Todos ~ HASBLED, data = base_univ, family = binomial (link = logit))) #0.062
+summary(glm(Compl_Sang_Todos ~ Alta_Carga_Trombo_TAC, data = base_univ, family = binomial (link = logit))) #0.16
+summary(glm(Compl_Sang_Todos ~ ClCr, data = base_univ, family = binomial (link = logit))) #0.53
+
+
+
+#NO SIGNIFICATIVAS:
+summary(glm(Compl_Sang_Todos ~ Pac_Edad, data = base_univ, family = binomial (link = logit)))#0.81
+summary(glm(Compl_Sang_Todos ~ Pac_HTA, data = base_univ, family = binomial (link = logit)))#0.76
+summary(glm(Compl_Sang_Todos ~ Pac_DBT, data = base_univ, family = binomial (link = logit)))#0.39
+summary(glm(Compl_Sang_Todos ~ Pac_TBQ, data = base_univ, family = binomial (link = logit)))
+summary(glm(Compl_Sang_Todos ~ Pac_DLP, data = base_univ, family = binomial (link = logit)))#0.22
+summary(glm(Compl_Sang_Todos ~ Pac_FA, data = base_univ, family = binomial (link = logit)))#0.29
+summary(glm(Compl_Sang_Todos ~ Pac_ETVpre, data = base_univ, family = binomial (link = logit)))#0.47
+summary(glm(Compl_Sang_Todos ~ Pac_TEP_previo_menor_3_meses, data = base_univ, family = binomial (link = logit)))#0.47
+summary(glm(Compl_Sang_Todos ~ Pac_Reposo, data = base_univ, family = binomial (link = logit)))#0.88
+summary(glm(Compl_Sang_Todos ~ Pac_EPOC, data = base_univ, family = binomial (link = logit)))#0.66
+summary(glm(Compl_Sang_Todos ~ PESI_Cancer, data = base_univ, family = binomial (link = logit)))#0.57
+summary(glm(Compl_Sang_Todos ~ Pac_ACO_Previa, data = base_univ, family = binomial (link = logit)))#0.75
+summary(glm(Compl_Sang_Todos ~ MotInt, data = base_univ, family = binomial (link = logit)))
+summary(glm(Compl_Sang_Todos ~ ACOint, data = base_univ, family = binomial (link = logit)))#0.4108
+summary(glm(Compl_Sang_Todos ~ IMC, data = base_univ, family = binomial (link = logit)))#0.549
+summary(glm(Compl_Sang_Todos ~ CC_FR_Ingreso, data = base_univ, family = binomial (link = logit)))#0.35
+summary(glm(Compl_Sang_Todos ~ Lab_Plaq, data = base_univ, family = binomial (link = logit)))#0.88
+summary(glm(Compl_Sang_Todos ~ ECOTT_FSVI, data = base_univ, family = binomial (link = logit)))# NO SIGN
+summary(glm(Compl_Sang_Todos ~ RIETE_Calc, data = base_univ, family = binomial (link = logit)))#0.52
+summary(glm(Compl_Sang_Todos ~ Lab_Cr, data = base_univ, family = binomial (link = logit)))#0.37
+summary(glm(Compl_Sang_Todos ~ Peso, data = base_univ, family = binomial (link = logit)))#0.37
+
+```
+
+> - Decidimos explorar las variables cuantitativas que no son significativas y realizar transformaciones para ver si se ajustan a un modelo de regresión logística. Para ello verificamos primero cuales no cumplen el supuesto de linealidad de los logits
+
+### b) Supuesto linealidad de logit
+
+```{r}
+base_logit <- base_imp[,!names(base_imp) %in% c("TEP_motivo_int", "miss.univ","DOAC_si_vs_no")]
+m_logits <- glm (Compl_Sang_Todos ~. , data = base_logit, family = binomial (link = logit))
+# Predict the probability (p) of diabete positivity
+probabilities <- predict(m_logits, type = "response")
+predicted.classes <- ifelse(probabilities > 0.3, "pos", "neg")
+head(predicted.classes)
+
+#1) Remove qualitative variables from the original data frame and bind the logit values to the data:
+# Select only numeric predictors
+
+mydata <- base_logit %>%
+  dplyr::select_if(is.numeric) 
+predictors <- colnames(mydata)
+# Bind the logit and tidying the data for plot
+mydata <- mydata %>%
+  mutate(logit = log(probabilities/(1-probabilities))) %>%
+  gather(key = "predictors", value = "predictor.value", -logit)
+
+#2)
+ggplot(mydata, aes(predictor.value, logit))+
+  geom_point(size = 0.5, alpha = 0.3) +
+  geom_smooth(method = "loess") + 
+  theme_bw() + 
+  facet_wrap(~predictors, scales = "free_x")
+
+#realizamos transformaciones logisticas de las variables ClCr, Plaquetas, Peso, Saturacion O2, GB
+base_logit2 <- base_logit
+base_logit2$Log_FC<- log(base_logit2$CC_FC_Ingreso)
+base_logit2$Log_TAS<- log(base_logit2$CC_TAS_Ingreso)
+base_logit2$Log_ClCr<- log(base_logit2$ClCr)
+base_logit2$Log_CC_SaO_Ingreso<- log(base_logit2$CC_SaO_Ingreso)
+base_logit2$Log_Lab_Plaq<- log(base_logit2$Lab_Plaq)
+base_logit2$Log_Lab_GB<- log(base_logit2$Lab_GB)
+base_logit2$Log_Peso<- log(base_logit2$Peso)
+base_logit2$Dias_Sx_Admision <- base_logit2$CC_Horas_Sx_Admision/24
+
+base_logit2 <- base_logit2[,!names(base_logit2) %in% c("ClCr", "CC_SaO_Ingreso", "Lab_Plaq", "Lab_GB", "Peso", "CC_Horas_Sx_Admision", "CC_FC_Ingreso", "CC_TAS_Ingreso")]
+
+base_logit2$Compl_Sang_Todos <- as.factor(base_logit2$Compl_Sang_Todos)
+levels(base_logit2$Compl_Sang_Todos) <- c("No", "Si")
+
+#corremos devuelta el gráfico
+m_logits2 <- glm (Compl_Sang_Todos ~. , data = base_logit2, family = binomial (link = logit))
+str(base_logit2)
+# Predict the probability (p) of diabete positivity
+probabilities2 <- predict(m_logits2, type = "response")
+predicted.classes2 <- ifelse(probabilities2 > 0.3, "pos", "neg")
+head(predicted.classes2)
+
+#1) Remove qualitative variables from the original data frame and bind the logit values to the data:
+# Select only numeric predictors
+nombres <- c("Edad", "Frec. resp. al ingreso", "Hemoglobina", "TAPSE", "PSAP", "Logaritmo FC", "Logaritmo TAS", "Logaritmo ClCr", "Logaritmo Sat O2", "Logaritmo plaquetas", "Logaritmo GB", "Logaritmo Peso", "Dias desde inicio de sintomas hasta consulta")
+
+mydata2 <- base_logit2 %>%
+  dplyr::select_if(is.numeric) 
+predictors <- colnames(nombres)
+# Bind the logit and tidying the data for plot
+mydata2 <- mydata2 %>%
+  mutate(logit = log(probabilities2/(1-probabilities2))) %>%
+  gather(key = "predictors", value = "predictor.value", -logit)
+
+#2)
+ggplot(mydata2, aes(predictor.value, logit))+
+  geom_point(size = 0.5, alpha = 0.5) +
+  geom_smooth(method = "loess") + 
+  theme_bw() + 
+  facet_wrap(~predictors, scales = "free_x")
+```
+
+>  Al realizar trasnformaciones logaritmicas, se ve que se respeta la linealidad de los logits, excepto en las siguientes variables: Globulos blancos, frecuencia cardíaca, frecuencia respiratoria y clearence de creatinina. Frecuencia respiratoria no se pudo transformar por la presencia de un valor = "0", que correspondiente a un paciente en paro cardiorrespiratorio. 
+
+### c) Multicolinealidad y valores influyentes
+
+```{r}
+#valores influentes
+plot(m_logits2, which = 4, id.n = 3)
+model.data <- augment(m_logits2) %>% dplyr::mutate(index = 1:n())
+model.data %>% top_n(3, .cooksd)
+ggplot(model.data, aes(index, .std.resid)) + 
+  geom_point(aes(color = m_logits2$Compl_Sang_Todos), alpha = .5) +
+  theme_bw()
+model.data %>% 
+  filter(abs(.std.resid) > 3)
+
+#hay un solo valor influyente
+
+#multicolinealidad
+car::vif(m_logits2) #Se evidencia multicolinealidad en las variables transformadas y en los scores, por lo cuál los sacamos y volvemos a evaluar.
+
+base_vif <- base_imp[,!names(base_imp) %in% c("TEP_motivo_int", "miss.univ","DOAC_si_vs_no", "Pac_Cobertura", "Pac_Hemorragia_Previa_Mayor_Reciente", "PESIcalc", "Lab_Cr", "Int_O_Alto_Riesgo_Calc", "RIETE_Calc", "TL_cual", "Lab_Plaq_Corte", "PESI_Taquicardia", "PESI_Taquipnea", "PESI_Hipotension", "CC_SaO90", "EstRiesgo", "MotInt")]
+m_vif <- glm (Compl_Sang_Todos ~. , data = base_vif, family = binomial (link = logit))
+car::vif(m_vif)
+```
+
+>. Se evidencia colinealidad significativa en algunas variables que son las que se utilizan para formular scores (PESI, RIETE) y también para ClCr. Al sacar estas variables transformadas y scores no vemos colinealidad significativa, excepto para las variables "Alta_Tto_Tipos_ACO" (Tipo de ACO al alta), "MotInt" (Motivo de internación) y EstRiesgo (Estratificación de riesgo por ESC). Lo tendremos en cuenta a la hora de seleccionar variables para los modelos de regresión. 
+
+>. Solamente evidenciamos 1 valor influyente.
+
+### d) Analisis de sensibilidad para las variables que no cumplen criterio de linealidad de logits
+
+>. Evaluaremos si separando a los pacientes en cuartiles o terciles podemos obtener rendimiento de las variables FR, FC, TAS, globulos blancos y clearence de creatinina. Además exploraremos las variables plaquetas y la variable edad, que no tienen pendiente en la curva de logits (lo cuál explica que no sean significativas en un modelo univariado) para ver si hay algún subgrupo donde se evidencie relación con la variable respuesta. 
+
+#### a) Edad
+
+```{r}
+base_sens <- base_logit2
+base_sens$Compl_Sang_Todos <- as.factor(base_sens$Compl_Sang_Todos)
+summary(base_sens$Pac_Edad)
+base_sens$Pac_Edad_Corte<-cut(base_sens$Pac_Edad,breaks=seq(16,97,length.out=5))
+table(base_sens$Pac_Edad_Corte)
+
+clases_edad <- cut(base_sens$Pac_Edad,breaks=seq(16,97,length.out=10))
+table(clases_edad)
+
+medias_edad<-tapply(base_sens$Pac_Edad,INDEX=clases_edad,FUN=mean) 
+
+base_sens$Compl_Sang_Todos <- as.integer(base_sens$Compl_Sang_Todos)
+sumaYporClases_edad<-tapply(base_sens$Compl_Sang_Todos,INDEX=clases_edad,FUN=sum)
+sumaYporClases_edad
+
+pEstimado_edad<-as.vector(sumaYporClases_edad/table(clases_edad))
+pEstimado_edad <- pEstimado_edad -1
+
+logit_edad<-log(pEstimado_edad/(1-(pEstimado_edad)))
+str(logit_edad)
+
+plot(medias_edad,logit_edad,xlab="Media de Edad por clase",
+     ylab="Logit de Probabilidad de Sangrado por clase",
+     main= "Prueba de relación lineal: Edad con Logit de probabilidad de
+     sangrado",col="blue",pch=20, type="lowess")
+
+# Separo en terciles y hago graficos
+
+base_sens$Pac_Edad_Terc <- ntile(base_sens$Pac_Edad, 3) 
+clases_edad_terc<-base_sens$Pac_Edad_Terc
+table(clases_edad_terc) 
+
+medias_edad_terc<-tapply(base_sens$Pac_Edad,INDEX=clases_edad_terc,FUN=mean) 
+
+sumaYporClases_edad_terc<-tapply(base_sens$Compl_Sang_Todos,INDEX=clases_edad_terc,FUN=sum)
+sumaYporClases_edad_terc
+
+pEstimado_edad_terc<-as.vector(sumaYporClases_edad_terc/table(clases_edad_terc))
+pEstimado_edad_terc <- pEstimado_edad_terc -1
+
+logit_edad_terc<-log(pEstimado_edad_terc/(1-(pEstimado_edad_terc)))
+
+plot(medias_edad_terc,logit_edad_terc,xlab="Media de Edad por clase",
+     ylab="Logit de Probabilidad de Sangrado por clase",
+     main= "Prueba de relación lineal: Edad terciles con Logit de probabilidad de
+     sangrado",col="blue",pch=20, type="lowess")
+
+# Separo en cuartiles y hago graficos 
+base_sens$Pac_Edad_Cuart <- ntile(base_sens$Pac_Edad, 4) 
+clases_edad_Cuart<-base_sens$Pac_Edad_Cuart
+table(clases_edad_Cuart) 
+
+medias_edad_Cuart<-tapply(base_sens$Pac_Edad,INDEX=clases_edad_Cuart,FUN=mean) 
+
+sumaYporClases_edad_Cuart<-tapply(base_sens$Compl_Sang_Todos,INDEX=clases_edad_Cuart,FUN=sum)
+sumaYporClases_edad_Cuart
+
+pEstimado_edad_Cuart<-as.vector(sumaYporClases_edad_Cuart/table(clases_edad_Cuart))
+pEstimado_edad_Cuart <- pEstimado_edad_Cuart -1
+
+logit_edad_Cuart<-log(pEstimado_edad_Cuart/(1-(pEstimado_edad_Cuart)))
+
+plot(medias_edad_Cuart,logit_edad_Cuart,xlab="Media de Edad por clase",
+     ylab="Logit de Probabilidad de Sangrado por clase",
+     main= "Prueba de relación lineal: Edad cuartiles con Logit de probabilidad de
+     sangrado",col="blue",pch=20, type="lowess")
+
+# Separo en quintiles y hago graficos 
+base_sens$Pac_Edad_Quint <- ntile(base_sens$Pac_Edad, 5) 
+clases_edad_Quint<-base_sens$Pac_Edad_Quint
+table(clases_edad_Quint) 
+
+medias_edad_Quint<-tapply(base_sens$Pac_Edad,INDEX=clases_edad_Quint,FUN=mean) 
+
+sumaYporClases_edad_Quint<-tapply(base_sens$Compl_Sang_Todos,INDEX=clases_edad_Quint,FUN=sum)
+sumaYporClases_edad_Quint
+
+pEstimado_edad_Quint<-as.vector(sumaYporClases_edad_Quint/table(clases_edad_Quint))
+pEstimado_edad_Quint <- pEstimado_edad_Quint -1
+
+logit_edad_Quint<-log(pEstimado_edad_Quint/(1-(pEstimado_edad_Quint)))
+
+plot(medias_edad_Quint,logit_edad_Quint,xlab="Media de Edad por clase",
+     ylab="Logit de Probabilidad de Sangrado por clase",
+     main= "Prueba de relación lineal: Edad quintiles con Logit de probabilidad de
+     sangrado",col="blue",pch=20, type="lowess")
+
+# Separo en dos y hago graficos 
+base_sens$Pac_Edad_Binom <- ntile(base_sens$Pac_Edad, 2) 
+clases_edad_Binom<-base_sens$Pac_Edad_Binom
+table(clases_edad_Binom) 
+
+medias_edad_Binom<-tapply(base_sens$Pac_Edad,INDEX=clases_edad_Binom,FUN=mean) 
+
+sumaYporClases_edad_Binom<-tapply(base_sens$Compl_Sang_Todos,INDEX=clases_edad_Binom,FUN=sum)
+sumaYporClases_edad_Binom
+
+pEstimado_edad_Binom<-as.vector(sumaYporClases_edad_Binom/table(clases_edad_Binom))
+pEstimado_edad_Binom <- pEstimado_edad_Binom -1
+
+logit_edad_Binom<-log(pEstimado_edad_Binom/(1-(pEstimado_edad_Binom)))
+
+plot(medias_edad_Binom,logit_edad_Binom,xlab="Media de Edad por clase",
+     ylab="Logit de Probabilidad de Sangrado por clase",
+     main= "Prueba de relación lineal: Edad dos grupos con Logit de probabilidad de
+     sangrado",col="blue",pch=20, type="lowess")
+```
+
+#### b) FR
+
+```{r}
+base_sens$Compl_Sang_Todos <- as.factor(base_sens$Compl_Sang_Todos)
+summary(base_sens$CC_FR_Ingreso)
+base_sens$CC_FR_Ingreso_Corte<-cut(base_sens$CC_FR_Ingreso,breaks=seq(0,43,length.out=5))
+table(base_sens$CC_FR_Ingreso_Corte)
+
+clases_fr <- cut(base_sens$CC_FR_Ingreso,breaks=seq(0,43,length.out=10))
+table(clases_fr)
+
+medias_fr<-tapply(base_sens$CC_FR_Ingreso,INDEX=clases_fr,FUN=mean) 
+
+base_sens$Compl_Sang_Todos <- as.integer(base_sens$Compl_Sang_Todos)
+sumaYporClases_fr<-tapply(base_sens$Compl_Sang_Todos,INDEX=clases_fr,FUN=sum)
+sumaYporClases_fr
+
+pEstimado_fr<-as.vector(sumaYporClases_fr/table(clases_fr))
+pEstimado_fr <- pEstimado_fr -1
+
+logit_fr<-log(pEstimado_fr/(1-(pEstimado_fr)))
+
+plot(medias_fr,logit_fr,xlab="Media de FR por clase",
+     ylab="Logit de Probabilidad de Sangrado por clase",
+     main= "Prueba de relación lineal: FR con Logit de probabilidad de
+     sangrado",col="blue",pch=20, type="lowess")
+
+# Separo en terciles y hago graficos
+
+base_sens$CC_FR_Ingreso_Terc <- ntile(base_sens$CC_FR_Ingreso, 3) 
+clases_fr_terc<-base_sens$CC_FR_Ingreso_Terc
+table(clases_fr_terc) 
+
+medias_fr_terc<-tapply(base_sens$CC_FR_Ingreso,INDEX=clases_fr_terc,FUN=mean) 
+
+sumaYporClases_fr_terc<-tapply(base_sens$Compl_Sang_Todos,INDEX=clases_fr_terc,FUN=sum)
+sumaYporClases_fr_terc
+
+pEstimado_fr_terc<-as.vector(sumaYporClases_fr_terc/table(clases_fr_terc))
+pEstimado_fr_terc <- pEstimado_fr_terc -1
+
+logit_fr_terc<-log(pEstimado_fr_terc/(1-(pEstimado_fr_terc)))
+
+plot(medias_fr_terc,logit_fr_terc,xlab="Media de FR por clase",
+     ylab="Logit de Probabilidad de Sangrado por clase",
+     main= "Prueba de relación lineal: FR terciles con Logit de probabilidad de
+     sangrado",col="blue",pch=20, type="lowess")
+
+# Separo en cuartiles y hago graficos 
+base_sens$CC_FR_Ingreso_Cuart <- ntile(base_sens$CC_FR_Ingreso, 4) 
+clases_fr_Cuart<-base_sens$CC_FR_Ingreso_Cuart
+table(clases_fr_Cuart) 
+
+medias_fr_Cuart<-tapply(base_sens$CC_FR_Ingreso,INDEX=clases_fr_Cuart,FUN=mean) 
+
+sumaYporClases_fr_Cuart<-tapply(base_sens$Compl_Sang_Todos,INDEX=clases_fr_Cuart,FUN=sum)
+sumaYporClases_fr_Cuart
+
+pEstimado_fr_Cuart<-as.vector(sumaYporClases_fr_Cuart/table(clases_fr_Cuart))
+pEstimado_fr_Cuart <- pEstimado_fr_Cuart -1
+
+logit_fr_Cuart<-log(pEstimado_fr_Cuart/(1-(pEstimado_fr_Cuart)))
+
+plot(medias_fr_Cuart,logit_fr_Cuart,xlab="Media de FR por clase",
+     ylab="Logit de Probabilidad de Sangrado por clase",
+     main= "Prueba de relación lineal: FR cuartiles con Logit de probabilidad de
+     sangrado",col="blue",pch=20, type="lowess")
+
+# Separo en quintiles y hago graficos 
+base_sens$CC_FR_Ingreso_Quint <- ntile(base_sens$CC_FR_Ingreso, 5) 
+clases_fr_Quint<-base_sens$CC_FR_Ingreso_Quint
+table(clases_fr_Quint) 
+
+medias_fr_Quint<-tapply(base_sens$CC_FR_Ingreso,INDEX=clases_fr_Quint,FUN=mean) 
+
+sumaYporClases_fr_Quint<-tapply(base_sens$Compl_Sang_Todos,INDEX=clases_fr_Quint,FUN=sum)
+sumaYporClases_fr_Quint
+
+pEstimado_fr_Quint<-as.vector(sumaYporClases_fr_Quint/table(clases_fr_Quint))
+pEstimado_fr_Quint <- pEstimado_fr_Quint -1
+
+logit_fr_Quint<-log(pEstimado_fr_Quint/(1-(pEstimado_fr_Quint)))
+
+plot(medias_fr_Quint,logit_fr_Quint,xlab="Media de FR por clase",
+     ylab="Logit de Probabilidad de Sangrado por clase",
+     main= "Prueba de relación lineal: FR quintiles con Logit de probabilidad de
+     sangrado",col="blue",pch=20, type="lowess")
+
+# Separo en dos y hago graficos 
+summary(base_sens$CC_FR_Ingreso)
+base_sens$CC_FR_Ingreso_Binom <- ntile(base_sens$CC_FR_Ingreso, 2) 
+clases_fr_Binom<-base_sens$CC_FR_Ingreso_Binom
+table(clases_fr_Binom) 
+
+medias_fr_Binom<-tapply(base_sens$CC_FR_Ingreso,INDEX=clases_fr_Binom,FUN=mean) 
+
+sumaYporClases_fr_Binom<-tapply(base_sens$Compl_Sang_Todos,INDEX=clases_fr_Binom,FUN=sum)
+sumaYporClases_fr_Binom
+
+pEstimado_fr_Binom<-as.vector(sumaYporClases_fr_Binom/table(clases_fr_Binom))
+pEstimado_fr_Binom <- pEstimado_fr_Binom -1
+
+logit_fr_Binom<-log(pEstimado_fr_Binom/(1-(pEstimado_fr_Binom)))
+
+plot(medias_fr_Binom,logit_fr_Binom,xlab="Media de FR por clase",
+     ylab="Logit de Probabilidad de Sangrado por clase",
+     main= "Prueba de relación lineal: FR dos grupos con Logit de probabilidad de
+     sangrado",col="blue",pch=20, type="lowess")
+```
+
+#### c) FC
+
+```{r}
+base_sens$Compl_Sang_Todos <- as.factor(base_sens$Compl_Sang_Todos)
+summary(base_sens$Log_FC)
+base_sens$Log_FC_Corte<-cut(base_sens$Log_FC,breaks=seq(3.4,5.19,length.out=5))
+table(base_sens$Log_FC_Corte)
+
+clases_FC <- cut(base_sens$Log_FC,breaks=seq(3.4,5.19,length.out=10))
+table(clases_FC)
+
+medias_FC<-tapply(base_sens$Log_FC,INDEX=clases_FC,FUN=mean) 
+
+base_sens$Compl_Sang_Todos <- as.integer(base_sens$Compl_Sang_Todos)
+sumaYporClases_FC<-tapply(base_sens$Compl_Sang_Todos,INDEX=clases_FC,FUN=sum)
+sumaYporClases_FC
+
+pEstimado_FC<-as.vector(sumaYporClases_FC/table(clases_FC))
+pEstimado_FC <- pEstimado_FC -1
+
+logit_FC<-log(pEstimado_FC/(1-(pEstimado_FC)))
+
+plot(medias_FC,logit_FC,xlab="Media de FC por clase",
+     ylab="Logit de Probabilidad de Sangrado por clase",
+     main= "Prueba de relación lineal: FC con Logit de probabilidad de
+     sangrado",col="blue",pch=20, type="lowess")
+
+# Separo en terciles y hago graficos
+
+base_sens$Log_FC_Terc <- ntile(base_sens$Log_FC, 3) 
+clases_FC_terc<-base_sens$Log_FC_Terc
+table(clases_FC_terc) 
+
+medias_FC_terc<-tapply(base_sens$Log_FC,INDEX=clases_FC_terc,FUN=mean) 
+
+sumaYporClases_FC_terc<-tapply(base_sens$Compl_Sang_Todos,INDEX=clases_FC_terc,FUN=sum)
+sumaYporClases_FC_terc
+
+pEstimado_FC_terc<-as.vector(sumaYporClases_FC_terc/table(clases_FC_terc))
+pEstimado_FC_terc <- pEstimado_FC_terc -1
+
+logit_FC_terc<-log(pEstimado_FC_terc/(1-(pEstimado_FC_terc)))
+
+plot(medias_FC_terc,logit_FC_terc,xlab="Media de FC por clase",
+     ylab="Logit de Probabilidad de Sangrado por clase",
+     main= "Prueba de relación lineal: FC terciles con Logit de probabilidad de
+     sangrado",col="blue",pch=20, type="lowess")
+
+# Separo en cuartiles y hago graficos 
+base_sens$Log_FC_Cuart <- ntile(base_sens$Log_FC, 4) 
+clases_FC_Cuart<-base_sens$Log_FC_Cuart
+table(clases_FC_Cuart) 
+
+medias_FC_Cuart<-tapply(base_sens$Log_FC,INDEX=clases_FC_Cuart,FUN=mean) 
+
+sumaYporClases_FC_Cuart<-tapply(base_sens$Compl_Sang_Todos,INDEX=clases_FC_Cuart,FUN=sum)
+sumaYporClases_FC_Cuart
+
+pEstimado_FC_Cuart<-as.vector(sumaYporClases_FC_Cuart/table(clases_FC_Cuart))
+pEstimado_FC_Cuart <- pEstimado_FC_Cuart -1
+
+logit_FC_Cuart<-log(pEstimado_FC_Cuart/(1-(pEstimado_FC_Cuart)))
+
+plot(medias_FC_Cuart,logit_FC_Cuart,xlab="Media de FC por clase",
+     ylab="Logit de Probabilidad de Sangrado por clase",
+     main= "Prueba de relación lineal: FC cuartiles con Logit de probabilidad de
+     sangrado",col="blue",pch=20, type="lowess")
+
+# Separo en quintiles y hago graficos 
+base_sens$Log_FC_Quint <- ntile(base_sens$Log_FC, 5) 
+clases_FC_Quint<-base_sens$Log_FC_Quint
+table(clases_FC_Quint) 
+
+medias_FC_Quint<-tapply(base_sens$Log_FC,INDEX=clases_FC_Quint,FUN=mean) 
+
+sumaYporClases_FC_Quint<-tapply(base_sens$Compl_Sang_Todos,INDEX=clases_FC_Quint,FUN=sum)
+sumaYporClases_FC_Quint
+
+pEstimado_FC_Quint<-as.vector(sumaYporClases_FC_Quint/table(clases_FC_Quint))
+pEstimado_FC_Quint <- pEstimado_FC_Quint -1
+
+logit_FC_Quint<-log(pEstimado_FC_Quint/(1-(pEstimado_FC_Quint)))
+
+plot(medias_FC_Quint,logit_FC_Quint,xlab="Media de FC por clase",
+     ylab="Logit de Probabilidad de Sangrado por clase",
+     main= "Prueba de relación lineal: FC quintiles con Logit de probabilidad de
+     sangrado",col="blue",pch=20, type="lowess")
+
+# Separo en dos y hago graficos 
+base_sens$Log_FC_Binom <- ntile(base_sens$Log_FC, 2) 
+clases_FC_Binom<-base_sens$Log_FC_Binom
+table(clases_FC_Binom) 
+
+medias_FC_Binom<-tapply(base_sens$Log_FC,INDEX=clases_FC_Binom,FUN=mean) 
+
+sumaYporClases_FC_Binom<-tapply(base_sens$Compl_Sang_Todos,INDEX=clases_FC_Binom,FUN=sum)
+sumaYporClases_FC_Binom
+
+pEstimado_FC_Binom<-as.vector(sumaYporClases_FC_Binom/table(clases_FC_Binom))
+pEstimado_FC_Binom <- pEstimado_FC_Binom -1
+
+logit_FC_Binom<-log(pEstimado_FC_Binom/(1-(pEstimado_FC_Binom)))
+
+plot(medias_FC_Binom,logit_FC_Binom,xlab="Media de FC por clase",
+     ylab="Logit de Probabilidad de Sangrado por clase",
+     main= "Prueba de relación lineal: FC dos grupos con Logit de probabilidad de
+     sangrado",col="blue",pch=20, type="lowess")
+```
+
+#### d) TAS
+
+```{r}
+base_sens$Compl_Sang_Todos <- as.factor(base_sens$Compl_Sang_Todos)
+summary(base_sens$Log_TAS)
+base_sens$Log_TAS_Corte<-cut(base_sens$Log_TAS,breaks=seq(3.91,5.39,length.out=5))
+table(base_sens$Log_TAS_Corte)
+
+clases_TAS <- cut(base_sens$Log_TAS,breaks=seq(3.91,5.39,length.out=10))
+table(clases_TAS)
+
+medias_TAS<-tapply(base_sens$Log_TAS,INDEX=clases_TAS,FUN=mean) 
+
+base_sens$Compl_Sang_Todos <- as.integer(base_sens$Compl_Sang_Todos)
+sumaYporClases_TAS<-tapply(base_sens$Compl_Sang_Todos,INDEX=clases_TAS,FUN=sum)
+sumaYporClases_TAS
+
+pEstimado_TAS<-as.vector(sumaYporClases_TAS/table(clases_TAS))
+pEstimado_TAS <- pEstimado_TAS -1
+
+logit_TAS<-log(pEstimado_TAS/(1-(pEstimado_TAS)))
+
+plot(medias_TAS,logit_TAS,xlab="Media de TAS por clase",
+     ylab="Logit de Probabilidad de Sangrado por clase",
+     main= "Prueba de relación lineal: TAS con Logit de probabilidad de
+     sangrado",col="blue",pch=20, type="lowess")
+
+# Separo en terciles y hago graficos
+
+base_sens$Log_TAS_Terc <- ntile(base_sens$Log_TAS, 3) 
+clases_TAS_terc<-base_sens$Log_TAS_Terc
+table(clases_TAS_terc) 
+
+medias_TAS_terc<-tapply(base_sens$Log_TAS,INDEX=clases_TAS_terc,FUN=mean) 
+
+sumaYporClases_TAS_terc<-tapply(base_sens$Compl_Sang_Todos,INDEX=clases_TAS_terc,FUN=sum)
+sumaYporClases_TAS_terc
+
+pEstimado_TAS_terc<-as.vector(sumaYporClases_TAS_terc/table(clases_TAS_terc))
+pEstimado_TAS_terc <- pEstimado_TAS_terc -1
+
+logit_TAS_terc<-log(pEstimado_TAS_terc/(1-(pEstimado_TAS_terc)))
+
+plot(medias_TAS_terc,logit_TAS_terc,xlab="Media de TAS por clase",
+     ylab="Logit de Probabilidad de Sangrado por clase",
+     main= "Prueba de relación lineal: TAS terciles con Logit de probabilidad de
+     sangrado",col="blue",pch=20, type="lowess")
+
+# Separo en cuartiles y hago graficos 
+base_sens$Log_TAS_Cuart <- ntile(base_sens$Log_TAS, 4) 
+clases_TAS_Cuart<-base_sens$Log_TAS_Cuart
+table(clases_TAS_Cuart) 
+
+medias_TAS_Cuart<-tapply(base_sens$Log_TAS,INDEX=clases_TAS_Cuart,FUN=mean) 
+
+sumaYporClases_TAS_Cuart<-tapply(base_sens$Compl_Sang_Todos,INDEX=clases_TAS_Cuart,FUN=sum)
+sumaYporClases_TAS_Cuart
+
+pEstimado_TAS_Cuart<-as.vector(sumaYporClases_TAS_Cuart/table(clases_TAS_Cuart))
+pEstimado_TAS_Cuart <- pEstimado_TAS_Cuart -1
+
+logit_TAS_Cuart<-log(pEstimado_TAS_Cuart/(1-(pEstimado_TAS_Cuart)))
+
+plot(medias_TAS_Cuart,logit_TAS_Cuart,xlab="Media de TAS por clase",
+     ylab="Logit de Probabilidad de Sangrado por clase",
+     main= "Prueba de relación lineal: TAS cuartiles con Logit de probabilidad de
+     sangrado",col="blue",pch=20, type="lowess")
+
+# Separo en quintiles y hago graficos 
+base_sens$Log_TAS_Quint <- ntile(base_sens$Log_TAS, 5) 
+clases_TAS_Quint<-base_sens$Log_TAS_Quint
+table(clases_TAS_Quint) 
+
+medias_TAS_Quint<-tapply(base_sens$Log_TAS,INDEX=clases_TAS_Quint,FUN=mean) 
+
+sumaYporClases_TAS_Quint<-tapply(base_sens$Compl_Sang_Todos,INDEX=clases_TAS_Quint,FUN=sum)
+sumaYporClases_TAS_Quint
+
+pEstimado_TAS_Quint<-as.vector(sumaYporClases_TAS_Quint/table(clases_TAS_Quint))
+pEstimado_TAS_Quint <- pEstimado_TAS_Quint -1
+
+logit_TAS_Quint<-log(pEstimado_TAS_Quint/(1-(pEstimado_TAS_Quint)))
+
+plot(medias_TAS_Quint,logit_TAS_Quint,xlab="Media de TAS por clase",
+     ylab="Logit de Probabilidad de Sangrado por clase",
+     main= "Prueba de relación lineal: TAS quintiles con Logit de probabilidad de
+     sangrado",col="blue",pch=20, type="lowess")
+
+# Separo en dos y hago graficos 
+base_sens$Log_TAS_Binom <- ntile(base_sens$Log_TAS, 2) 
+clases_TAS_Binom<-base_sens$Log_TAS_Binom
+table(clases_TAS_Binom) 
+
+medias_TAS_Binom<-tapply(base_sens$Log_TAS,INDEX=clases_TAS_Binom,FUN=mean) 
+
+sumaYporClases_TAS_Binom<-tapply(base_sens$Compl_Sang_Todos,INDEX=clases_TAS_Binom,FUN=sum)
+sumaYporClases_TAS_Binom
+
+pEstimado_TAS_Binom<-as.vector(sumaYporClases_TAS_Binom/table(clases_TAS_Binom))
+pEstimado_TAS_Binom <- pEstimado_TAS_Binom -1
+
+logit_TAS_Binom<-log(pEstimado_TAS_Binom/(1-(pEstimado_TAS_Binom)))
+
+plot(medias_TAS_Binom,logit_TAS_Binom,xlab="Media de TAS por clase",
+     ylab="Logit de Probabilidad de Sangrado por clase",
+     main= "Prueba de relación lineal: Cr dos grupos con Logit de probabilidad de
+     sangrado",col="blue",pch=20, type="lowess")
+```
+
+
+#### e) Plaquetas
+
+```{r}
+base_sens$Compl_Sang_Todos <- as.factor(base_sens$Compl_Sang_Todos)
+summary(base_sens$Log_Lab_Plaq)
+base_sens$Log_Lab_Plaq_Corte<-cut(base_sens$Log_Lab_Plaq,breaks=seq(15.42,57.33,length.out=5))
+table(base_sens$Log_Lab_Plaq_Corte)
+
+clases_Log_Lab_Plaq <- cut(base_sens$Log_Lab_Plaq,breaks=seq(15.42,57.33,length.out=10))
+table(clases_Log_Lab_Plaq)
+
+medias_Log_Lab_Plaq<-tapply(base_sens$Log_Lab_Plaq,INDEX=clases_Log_Lab_Plaq,FUN=mean) 
+
+base_sens$Compl_Sang_Todos <- as.integer(base_sens$Compl_Sang_Todos)
+sumaYporClases_Log_Lab_Plaq<-tapply(base_sens$Compl_Sang_Todos,INDEX=clases_Log_Lab_Plaq,FUN=sum)
+sumaYporClases_Log_Lab_Plaq
+
+pEstimado_Log_Lab_Plaq<-as.vector(sumaYporClases_Log_Lab_Plaq/table(clases_Log_Lab_Plaq))
+pEstimado_Log_Lab_Plaq <- pEstimado_Log_Lab_Plaq -1
+
+logit_Log_Lab_Plaq<-log(pEstimado_Log_Lab_Plaq/(1-(pEstimado_Log_Lab_Plaq)))
+
+# Separo en terciles y hago graficos
+
+base_sens$Log_Lab_Plaq_Terc <- ntile(base_sens$Log_Lab_Plaq, 3) 
+clases_Log_Lab_Plaq_terc<-base_sens$Log_Lab_Plaq_Terc
+table(clases_Log_Lab_Plaq_terc) 
+
+medias_Log_Lab_Plaq_terc<-tapply(base_sens$Log_Lab_Plaq,INDEX=clases_Log_Lab_Plaq_terc,FUN=mean) 
+
+sumaYporClases_Log_Lab_Plaq_terc<-tapply(base_sens$Compl_Sang_Todos,INDEX=clases_Log_Lab_Plaq_terc,FUN=sum)
+sumaYporClases_Log_Lab_Plaq_terc
+
+pEstimado_Log_Lab_Plaq_terc<-as.vector(sumaYporClases_Log_Lab_Plaq_terc/table(clases_Log_Lab_Plaq_terc))
+pEstimado_Log_Lab_Plaq_terc <- pEstimado_Log_Lab_Plaq_terc -1
+
+logit_Log_Lab_Plaq_terc<-log(pEstimado_Log_Lab_Plaq_terc/(1-(pEstimado_Log_Lab_Plaq_terc)))
+
+plot(medias_Log_Lab_Plaq_terc,logit_Log_Lab_Plaq_terc,xlab="Media de Plaquetas por clase",
+     ylab="Logit de Probabilidad de Sangrado por clase",
+     main= "Prueba de relación lineal: Plaquetas terciles con Logit de probabilidad de
+     sangrado",col="blue",pch=20, type="lowess")
+
+# Separo en cuartiles y hago graficos 
+base_sens$Log_Lab_Plaq_Cuart <- ntile(base_sens$Log_Lab_Plaq, 4) 
+clases_Log_Lab_Plaq_Cuart<-base_sens$Log_Lab_Plaq_Cuart
+table(clases_Log_Lab_Plaq_Cuart) 
+
+medias_Log_Lab_Plaq_Cuart<-tapply(base_sens$Log_Lab_Plaq,INDEX=clases_Log_Lab_Plaq_Cuart,FUN=mean) 
+
+sumaYporClases_Log_Lab_Plaq_Cuart<-tapply(base_sens$Compl_Sang_Todos,INDEX=clases_Log_Lab_Plaq_Cuart,FUN=sum)
+sumaYporClases_Log_Lab_Plaq_Cuart
+
+pEstimado_Log_Lab_Plaq_Cuart<-as.vector(sumaYporClases_Log_Lab_Plaq_Cuart/table(clases_Log_Lab_Plaq_Cuart))
+pEstimado_Log_Lab_Plaq_Cuart <- pEstimado_Log_Lab_Plaq_Cuart -1
+
+logit_Log_Lab_Plaq_Cuart<-log(pEstimado_Log_Lab_Plaq_Cuart/(1-(pEstimado_Log_Lab_Plaq_Cuart)))
+
+plot(medias_Log_Lab_Plaq_Cuart,logit_Log_Lab_Plaq_Cuart,xlab="Media de Plaquetas por clase",
+     ylab="Logit de Probabilidad de Sangrado por clase",
+     main= "Prueba de relación lineal: Plaquetas cuartiles con Logit de probabilidad de
+     sangrado",col="blue",pch=20, type="lowess")
+
+# Separo en quintiles y hago graficos 
+base_sens$Log_Lab_Plaq_Quint <- ntile(base_sens$Log_Lab_Plaq, 5) 
+clases_Log_Lab_Plaq_Quint<-base_sens$Log_Lab_Plaq_Quint
+table(clases_Log_Lab_Plaq_Quint) 
+
+medias_Log_Lab_Plaq_Quint<-tapply(base_sens$Log_Lab_Plaq,INDEX=clases_Log_Lab_Plaq_Quint,FUN=mean) 
+
+sumaYporClases_Log_Lab_Plaq_Quint<-tapply(base_sens$Compl_Sang_Todos,INDEX=clases_Log_Lab_Plaq_Quint,FUN=sum)
+sumaYporClases_Log_Lab_Plaq_Quint
+
+pEstimado_Log_Lab_Plaq_Quint<-as.vector(sumaYporClases_Log_Lab_Plaq_Quint/table(clases_Log_Lab_Plaq_Quint))
+pEstimado_Log_Lab_Plaq_Quint <- pEstimado_Log_Lab_Plaq_Quint -1
+
+logit_Log_Lab_Plaq_Quint<-log(pEstimado_Log_Lab_Plaq_Quint/(1-(pEstimado_Log_Lab_Plaq_Quint)))
+
+plot(medias_Log_Lab_Plaq_Quint,logit_Log_Lab_Plaq_Quint,xlab="Media de Plaquetas por clase",
+     ylab="Logit de Probabilidad de Sangrado por clase",
+     main= "Prueba de relación lineal: Plaquetas quintiles con Logit de probabilidad de
+     sangrado",col="blue",pch=20, type="lowess")
+
+# Separo en dos y hago graficos 
+base_sens$Log_Lab_Plaq_Binom <- ntile(base_sens$Log_Lab_Plaq, 2) 
+clases_Log_Lab_Plaq_Binom<-base_sens$Log_Lab_Plaq_Binom
+table(clases_Log_Lab_Plaq_Binom) 
+
+medias_Log_Lab_Plaq_Binom<-tapply(base_sens$Log_Lab_Plaq,INDEX=clases_Log_Lab_Plaq_Binom,FUN=mean) 
+
+sumaYporClases_Log_Lab_Plaq_Binom<-tapply(base_sens$Compl_Sang_Todos,INDEX=clases_Log_Lab_Plaq_Binom,FUN=sum)
+sumaYporClases_Log_Lab_Plaq_Binom
+
+pEstimado_Log_Lab_Plaq_Binom<-as.vector(sumaYporClases_Log_Lab_Plaq_Binom/table(clases_Log_Lab_Plaq_Binom))
+pEstimado_Log_Lab_Plaq_Binom <- pEstimado_Log_Lab_Plaq_Binom -1
+
+logit_Log_Lab_Plaq_Binom<-log(pEstimado_Log_Lab_Plaq_Binom/(1-(pEstimado_Log_Lab_Plaq_Binom)))
+
+plot(medias_Log_Lab_Plaq_Binom,logit_Log_Lab_Plaq_Binom,xlab="Media de Plaquetas por clase",
+     ylab="Logit de Probabilidad de Sangrado por clase",
+     main= "Prueba de relación lineal: Plaquetas dos grupos con Logit de probabilidad de
+     sangrado",col="blue",pch=20, type="lowess")
+```
+
+#### f) Globulos blancos (GB)
+
+```{r}
+base_sens$Compl_Sang_Todos <- as.factor(base_sens$Compl_Sang_Todos)
+summary(base_sens$Log_Lab_GB)
+base_sens$Log_Lab_GB_Corte<-cut(base_sens$Log_Lab_GB,breaks=seq(7.03,11.59,length.out=5))
+table(base_sens$Log_Lab_GB_Corte)
+
+clases_GB <- cut(base_sens$Log_Lab_GB,breaks=seq(7.03,11.59,length.out=10))
+table(clases_GB)
+
+medias_GB<-tapply(base_sens$Log_Lab_GB,INDEX=clases_GB,FUN=mean) 
+
+base_sens$Compl_Sang_Todos <- as.integer(base_sens$Compl_Sang_Todos)
+sumaYporClases_GB<-tapply(base_sens$Compl_Sang_Todos,INDEX=clases_GB,FUN=sum)
+sumaYporClases_GB
+
+pEstimado_GB<-as.vector(sumaYporClases_GB/table(clases_GB))
+pEstimado_GB <- pEstimado_GB -1
+
+logit_GB<-log(pEstimado_GB/(1-(pEstimado_GB)))
+
+plot(medias_GB,logit_GB,xlab="Media de GB por clase",
+     ylab="Logit de Probabilidad de Sangrado por clase",
+     main= "Prueba de relación lineal: GB con Logit de probabilidad de
+     sangrado",col="blue",pch=20, type="lowess")
+
+# Separo en terciles y hago graficos
+
+base_sens$Log_Lab_GB_Terc <- ntile(base_sens$Log_Lab_GB, 3) 
+clases_GB_terc<-base_sens$Log_Lab_GB_Terc
+table(clases_GB_terc) 
+
+medias_GB_terc<-tapply(base_sens$Log_Lab_GB,INDEX=clases_GB_terc,FUN=mean) 
+
+sumaYporClases_GB_terc<-tapply(base_sens$Compl_Sang_Todos,INDEX=clases_GB_terc,FUN=sum)
+sumaYporClases_GB_terc
+
+pEstimado_GB_terc<-as.vector(sumaYporClases_GB_terc/table(clases_GB_terc))
+pEstimado_GB_terc <- pEstimado_GB_terc -1
+
+logit_GB_terc<-log(pEstimado_GB_terc/(1-(pEstimado_GB_terc)))
+
+plot(medias_GB_terc,logit_GB_terc,xlab="Media de GB por clase",
+     ylab="Logit de Probabilidad de Sangrado por clase",
+     main= "Prueba de relación lineal: GB terciles con Logit de probabilidad de
+     sangrado",col="blue",pch=20, type="lowess")
+
+# Separo en cuartiles y hago graficos 
+base_sens$Log_Lab_GB_Cuart <- ntile(base_sens$Log_Lab_GB, 4) 
+clases_GB_Cuart<-base_sens$Log_Lab_GB_Cuart
+table(clases_GB_Cuart) 
+
+medias_GB_Cuart<-tapply(base_sens$Log_Lab_GB,INDEX=clases_GB_Cuart,FUN=mean) 
+
+sumaYporClases_GB_Cuart<-tapply(base_sens$Compl_Sang_Todos,INDEX=clases_GB_Cuart,FUN=sum)
+sumaYporClases_GB_Cuart
+
+pEstimado_GB_Cuart<-as.vector(sumaYporClases_GB_Cuart/table(clases_GB_Cuart))
+pEstimado_GB_Cuart <- pEstimado_GB_Cuart -1
+
+logit_GB_Cuart<-log(pEstimado_GB_Cuart/(1-(pEstimado_GB_Cuart)))
+
+plot(medias_GB_Cuart,logit_GB_Cuart,xlab="Media de GB por clase",
+     ylab="Logit de Probabilidad de Sangrado por clase",
+     main= "Prueba de relación lineal: GB cuartiles con Logit de probabilidad de
+     sangrado",col="blue",pch=20, type="lowess")
+
+# Separo en quintiles y hago graficos 
+base_sens$Log_Lab_GB_Quint <- ntile(base_sens$Log_Lab_GB, 5) 
+clases_GB_Quint<-base_sens$Log_Lab_GB_Quint
+table(clases_GB_Quint) 
+
+medias_GB_Quint<-tapply(base_sens$Log_Lab_GB,INDEX=clases_GB_Quint,FUN=mean) 
+
+sumaYporClases_GB_Quint<-tapply(base_sens$Compl_Sang_Todos,INDEX=clases_GB_Quint,FUN=sum)
+sumaYporClases_GB_Quint
+
+pEstimado_GB_Quint<-as.vector(sumaYporClases_GB_Quint/table(clases_GB_Quint))
+pEstimado_GB_Quint <- pEstimado_GB_Quint -1
+
+logit_GB_Quint<-log(pEstimado_GB_Quint/(1-(pEstimado_GB_Quint)))
+
+plot(medias_GB_Quint,logit_GB_Quint,xlab="Media de GB por clase",
+     ylab="Logit de Probabilidad de Sangrado por clase",
+     main= "Prueba de relación lineal: GB quintiles con Logit de probabilidad de
+     sangrado",col="blue",pch=20, type="lowess")
+
+# Separo en dos y hago graficos 
+base_sens$Log_Lab_GB_Binom <- ntile(base_sens$Log_Lab_GB, 2) 
+clases_GB_Binom<-base_sens$Log_Lab_GB_Binom
+table(clases_GB_Binom) 
+
+medias_GB_Binom<-tapply(base_sens$Log_Lab_GB,INDEX=clases_GB_Binom,FUN=mean) 
+
+sumaYporClases_GB_Binom<-tapply(base_sens$Compl_Sang_Todos,INDEX=clases_GB_Binom,FUN=sum)
+sumaYporClases_GB_Binom
+
+pEstimado_GB_Binom<-as.vector(sumaYporClases_GB_Binom/table(clases_GB_Binom))
+pEstimado_GB_Binom <- pEstimado_GB_Binom -1
+
+logit_GB_Binom<-log(pEstimado_GB_Binom/(1-(pEstimado_GB_Binom)))
+
+plot(medias_GB_Binom,logit_GB_Binom,xlab="Media de GB por clase",
+     ylab="Logit de Probabilidad de Sangrado por clase",
+     main= "Prueba de relación lineal: GB dos grupos con Logit de probabilidad de
+     sangrado",col="blue",pch=20, type="lowess")
+```
+
+#### g) Clearence de creatinina
+
+```{r}
+base_sens$Compl_Sang_Todos <- as.factor(base_sens$Compl_Sang_Todos)
+summary(base_sens$Log_ClCr)
+base_sens$Log_ClCr_Corte<-cut(base_sens$Log_ClCr,breaks=seq(7.03,11.59,length.out=5))
+table(base_sens$Log_ClCr_Corte)
+
+clases_Log_ClCr <- cut(base_sens$Log_ClCr,breaks=seq(7.03,11.59,length.out=10))
+table(clases_Log_ClCr)
+
+medias_Log_ClCr<-tapply(base_sens$Log_ClCr,INDEX=clases_Log_ClCr,FUN=mean) 
+
+base_sens$Compl_Sang_Todos <- as.integer(base_sens$Compl_Sang_Todos)
+sumaYporClases_Log_ClCr<-tapply(base_sens$Compl_Sang_Todos,INDEX=clases_Log_ClCr,FUN=sum)
+sumaYporClases_Log_ClCr
+
+pEstimado_Log_ClCr<-as.vector(sumaYporClases_Log_ClCr/table(clases_Log_ClCr))
+pEstimado_Log_ClCr <- pEstimado_Log_ClCr -1
+
+logit_Log_ClCr<-log(pEstimado_Log_ClCr/(1-(pEstimado_Log_ClCr)))
+
+# Separo en terciles y hago graficos
+
+base_sens$Log_ClCr_Terc <- ntile(base_sens$Log_ClCr, 3) 
+clases_Log_ClCr_terc<-base_sens$Log_ClCr_Terc
+table(clases_Log_ClCr_terc) 
+
+medias_Log_ClCr_terc<-tapply(base_sens$Log_ClCr,INDEX=clases_Log_ClCr_terc,FUN=mean) 
+
+sumaYporClases_Log_ClCr_terc<-tapply(base_sens$Compl_Sang_Todos,INDEX=clases_Log_ClCr_terc,FUN=sum)
+sumaYporClases_Log_ClCr_terc
+
+pEstimado_Log_ClCr_terc<-as.vector(sumaYporClases_Log_ClCr_terc/table(clases_Log_ClCr_terc))
+pEstimado_Log_ClCr_terc <- pEstimado_Log_ClCr_terc -1
+
+logit_Log_ClCr_terc<-log(pEstimado_Log_ClCr_terc/(1-(pEstimado_Log_ClCr_terc)))
+
+plot(medias_Log_ClCr_terc,logit_Log_ClCr_terc,xlab="Media de Log_ClCr por clase",
+     ylab="Logit de Probabilidad de Sangrado por clase",
+     main= "Prueba de relación lineal: Log_ClCr terciles con Logit de probabilidad de
+     sangrado",col="blue",pch=20, type="lowess")
+
+# Separo en cuartiles y hago graficos 
+base_sens$Log_ClCr_Cuart <- ntile(base_sens$Log_ClCr, 4) 
+clases_Log_ClCr_Cuart<-base_sens$Log_ClCr_Cuart
+table(clases_Log_ClCr_Cuart) 
+
+medias_Log_ClCr_Cuart<-tapply(base_sens$Log_ClCr,INDEX=clases_Log_ClCr_Cuart,FUN=mean) 
+
+sumaYporClases_Log_ClCr_Cuart<-tapply(base_sens$Compl_Sang_Todos,INDEX=clases_Log_ClCr_Cuart,FUN=sum)
+sumaYporClases_Log_ClCr_Cuart
+
+pEstimado_Log_ClCr_Cuart<-as.vector(sumaYporClases_Log_ClCr_Cuart/table(clases_Log_ClCr_Cuart))
+pEstimado_Log_ClCr_Cuart <- pEstimado_Log_ClCr_Cuart -1
+
+logit_Log_ClCr_Cuart<-log(pEstimado_Log_ClCr_Cuart/(1-(pEstimado_Log_ClCr_Cuart)))
+
+plot(medias_Log_ClCr_Cuart,logit_Log_ClCr_Cuart,xlab="Media de Log_ClCr por clase",
+     ylab="Logit de Probabilidad de Sangrado por clase",
+     main= "Prueba de relación lineal: Log_ClCr cuartiles con Logit de probabilidad de
+     sangrado",col="blue",pch=20, type="lowess")
+
+# Separo en quintiles y hago graficos 
+base_sens$Log_ClCr_Quint <- ntile(base_sens$Log_ClCr, 5) 
+clases_Log_ClCr_Quint<-base_sens$Log_ClCr_Quint
+table(clases_Log_ClCr_Quint) 
+
+medias_Log_ClCr_Quint<-tapply(base_sens$Log_ClCr,INDEX=clases_Log_ClCr_Quint,FUN=mean) 
+
+sumaYporClases_Log_ClCr_Quint<-tapply(base_sens$Compl_Sang_Todos,INDEX=clases_Log_ClCr_Quint,FUN=sum)
+sumaYporClases_Log_ClCr_Quint
+
+pEstimado_Log_ClCr_Quint<-as.vector(sumaYporClases_Log_ClCr_Quint/table(clases_Log_ClCr_Quint))
+pEstimado_Log_ClCr_Quint <- pEstimado_Log_ClCr_Quint -1
+
+logit_Log_ClCr_Quint<-log(pEstimado_Log_ClCr_Quint/(1-(pEstimado_Log_ClCr_Quint)))
+
+plot(medias_Log_ClCr_Quint,logit_Log_ClCr_Quint,xlab="Media de Log_ClCr por clase",
+     ylab="Logit de Probabilidad de Sangrado por clase",
+     main= "Prueba de relación lineal: Log_ClCr quintiles con Logit de probabilidad de
+     sangrado",col="blue",pch=20, type="lowess")
+
+# Separo en dos y hago graficos 
+base_sens$Log_ClCr_Binom <- ntile(base_sens$Log_ClCr, 2) 
+clases_Log_ClCr_Binom<-base_sens$Log_ClCr_Binom
+table(clases_Log_ClCr_Binom) 
+
+medias_Log_ClCr_Binom<-tapply(base_sens$Log_ClCr,INDEX=clases_Log_ClCr_Binom,FUN=mean) 
+
+sumaYporClases_Log_ClCr_Binom<-tapply(base_sens$Compl_Sang_Todos,INDEX=clases_Log_ClCr_Binom,FUN=sum)
+sumaYporClases_Log_ClCr_Binom
+
+pEstimado_Log_ClCr_Binom<-as.vector(sumaYporClases_Log_ClCr_Binom/table(clases_Log_ClCr_Binom))
+pEstimado_Log_ClCr_Binom <- pEstimado_Log_ClCr_Binom -1
+
+logit_Log_ClCr_Binom<-log(pEstimado_Log_ClCr_Binom/(1-(pEstimado_Log_ClCr_Binom)))
+
+plot(medias_Log_ClCr_Binom,logit_Log_ClCr_Binom,xlab="Media de Log_ClCr por clase",
+     ylab="Logit de Probabilidad de Sangrado por clase",
+     main= "Prueba de relación lineal: Log_ClCr dos grupos con Logit de probabilidad de
+     sangrado",col="blue",pch=20, type="lowess")
+```
+
+### c) Analisis univariado luego de analisis de sensibilidad
+
+```{r}
+base_sens$Compl_Sang_Todos <- as.factor(base_sens$Compl_Sang_Todos)
+#edad ninguno es significativo
+summary(glm(Compl_Sang_Todos ~ Pac_Edad_Binom, data = base_sens, family = binomial (link = logit)))
+summary(glm(Compl_Sang_Todos ~ Pac_Edad_Terc, data = base_sens, family = binomial (link = logit)))
+summary(glm(Compl_Sang_Todos ~ Pac_Edad_Cuart, data = base_sens, family = binomial (link = logit)))
+summary(glm(Compl_Sang_Todos ~ Pac_Edad_Quint, data = base_sens, family = binomial (link = logit)))
+
+#FR terciles es significativo
+summary(glm(Compl_Sang_Todos ~ CC_FR_Ingreso_Binom, data = base_sens, family = binomial (link = logit)))
+summary(glm(Compl_Sang_Todos ~ CC_FR_Ingreso_Terc, data = base_sens, family = binomial (link = logit))) #0.06
+summary(glm(Compl_Sang_Todos ~ CC_FR_Ingreso_Cuart, data = base_sens, family = binomial (link = logit)))
+summary(glm(Compl_Sang_Todos ~ CC_FR_Ingreso_Quint, data = base_sens, family = binomial (link = logit)))
+
+#FC todos significativos pero terciles lineal
+summary(glm(Compl_Sang_Todos ~ Log_FC_Binom, data = base_sens, family = binomial (link = logit)))
+summary(glm(Compl_Sang_Todos ~ Log_FC_Terc, data = base_sens, family = binomial (link = logit))) #0.007
+summary(glm(Compl_Sang_Todos ~ Log_FC_Cuart, data = base_sens, family = binomial (link = logit)))
+summary(glm(Compl_Sang_Todos ~ Log_FC_Quint, data = base_sens, family = binomial (link = logit)))
+
+#TAS terciles borderline y lineal
+summary(glm(Compl_Sang_Todos ~ Log_TAS_Binom, data = base_sens, family = binomial (link = logit)))
+summary(glm(Compl_Sang_Todos ~ Log_TAS_Terc, data = base_sens, family = binomial (link = logit)))
+summary(glm(Compl_Sang_Todos ~ Log_TAS_Cuart, data = base_sens, family = binomial (link = logit))) #13
+summary(glm(Compl_Sang_Todos ~ Log_TAS_Quint, data = base_sens, family = binomial (link = logit)))
+
+#Plaq nada es lineal ni significativo
+summary(glm(Compl_Sang_Todos ~ Log_Lab_Plaq_Binom, data = base_sens, family = binomial (link = logit)))
+summary(glm(Compl_Sang_Todos ~ Log_Lab_Plaq_Terc, data = base_sens, family = binomial (link = logit)))
+summary(glm(Compl_Sang_Todos ~ Log_Lab_Plaq_Cuart, data = base_sens, family = binomial (link = logit)))
+summary(glm(Compl_Sang_Todos ~ Log_Lab_Plaq_Quint, data = base_sens, family = binomial (link = logit)))
+
+#GB terciles significativo y lineal
+summary(glm(Compl_Sang_Todos ~ Log_Lab_GB_Binom, data = base_sens, family = binomial (link = logit)))
+summary(glm(Compl_Sang_Todos ~ Log_Lab_GB_Terc, data = base_sens, family = binomial (link = logit)))
+summary(glm(Compl_Sang_Todos ~ Log_Lab_GB_Cuart, data = base_sens, family = binomial (link = logit)))
+summary(glm(Compl_Sang_Todos ~ Log_Lab_GB_Quint, data = base_sens, family = binomial (link = logit)))
+
+#ClCr no es significativo ni lineal
+summary(glm(Compl_Sang_Todos ~ Log_ClCr_Binom, data = base_sens, family = binomial (link = logit)))
+summary(glm(Compl_Sang_Todos ~ Log_ClCr_Terc, data = base_sens, family = binomial (link = logit)))
+summary(glm(Compl_Sang_Todos ~ Log_ClCr_Cuart, data = base_sens, family = binomial (link = logit)))
+summary(glm(Compl_Sang_Todos ~ Log_ClCr_Quint, data = base_sens, family = binomial (link = logit)))
+
+```
+
+>* La transformación de variables o separación en terciles-cuartiles no aporta información util para EDAD, PLAQUETAS ni ClCr. Por ende estas variables no podrían ser consideradas en un análisis de regresión logística.
+Para la transformación de GB, TAS, FC y FR hay significación estadística en modelo univariado si se los divide en terciles.
+
+
+## 7) **Métodos de selección de variables no convencionales**
+
+> -  Para estos métodos de selección automáticos decidimos eliminar las variables que no son de interés para el propósito de este trabajo. 
+
+Por un lado se decide no analizar scores por los siguientes motivos:
+- Score de RIETE: fue diseñado para trombosis venosa profunda y tromboembolismo de pulmon. Esta población solo incluye pacientes con tromboembolismo pulmonar, por lo cuál el score siempre puntua 1 o más.
+- Score de PESI fue ideado para evaluar mortalidad. 
+- Score de Wells fue ideado para evaluar la probabilidad pre-test de TEP.
+
+Se deja solamente el score de HASBLED, con la salvedad de que este score fue cargado por el personal que llenaba la base y no se constataron todas las variables de forma separada (uso de antiagregantes, hipertensión descontrolada).
+
+Por otro lado se eliminan las variables que no influyen en el sangrado sino que son consecuencia temporal posterior al mismo: uso de filtro de VCI (FVCI).
+
+Decidimos eliminar las siguientes variables PESI_Taquicardia, PESI_Hipotensión, PESI_Taquipnea, PESI_Hipotermia y CC_SaO90 (saturacíon menor a 90%) ya que incluiremos las variables continuas en el análisis: FR, FC, TAS y saturación de oxígeno aire ambiente al ingreso. 
+
+Se eliminan otras variables que tampoco son de interes para el analisis: Servicio a Cargo, Motivo de Internación, Uso de DOACs al alta, Tipo de ACO al alta (la mayoria de los pacientes sangraron en la internacion y no en el seguimienoto a 30 días), uso de ACO en la internación (solamente 3 de 23 pacientes no recibieron anticoagulacion por sangrado), Alta carga trombótica por TAC, Complicaciones hemodinámicas en la internación.
+
+Se decidió incluir las variables TEP/TVP previo global y Hemorragia Mayor global en vez de las variables TEP previo menor a 3 meses y Hemorragia mayor reciente. 
+
+Dejamos solamente la variable Clearence de creatinina ya que es la que mejor correlaciona, eliminamos para estos métodos de selección Pac_IRC_Global, Lab_Cr. 
+
+Por otro lado, se tomo la decisión de dictomizar la variable Motivo de internación en 2: por TEP o no por TEP, debido a la poca cantidad de casos por otros motivos no se pudo realizar un análisis con más categorías. También se dicotomizó la variable Edad en mayores o menores de 75 años, ya que la variable cuantitativa no cumple con el supuesto de linealidad y es de nuestro interés que sea agregada. La dicotomización en 75 se realizó por bibliografía, ya que scores como el de RIETE utilizan esta edad para evaluar el riesgo de sangrado.
+
+a) ### Selección de variables
+```{r}
+
+base_imp <- base_backup
+base_imp <- base_imp[,!names(base_imp) %in% c("Pac_IRCglobal","Lab_Cr", "ECOTT_DisfVD", "DOAC_si_vs_no","Alta_Tto_TiposACO", "FVCI", "TiempoInt", "RIETE_Grupo", "ACOint", "Pac_Reposo", "PESI_Hipotermia", "ECOTT_FSVI", "Int_O_Alto_Riesgo_Calc", "PESI_Taquicardia", "PESI_Taquipnea", "ServicioCargo", "TL_cual", "PESI_Det_Sens", "PESI_Hipotension", "CC_SaO90", "Pac_TEP_previo_menor_3_meses", "PESIECHO", "PESIcalc", "Wells", "HASBLED", "RIETE_Calc", "MotInt", "Trauma", "Tto_Reperf", "Compl_SoporteHD_NO", "Lab_Hb_Corte", "Lab_Plaq_Corte", "EstRiesgo", "Lab_Hto", "PESI_Calc", "PESIsCalc", "PESI_clasif", "Pac_Cobertura", "Pac_Edad_Corte", "Alta_Carga_Trombo_TAC", "miss.univ", "Pac_Hemorragia_Previa_Mayor_Reciente", "PESIs_Clasif", "IMC")]
+```
+
+### a) Random Forest
+
+>* El segundo método de análisis para la selección de variables es Random Forest. En este método no incluimos las variables transformadas. 
+
+```{r}
+base_imp <- map_if(.x = base_imp, .p = is.character, .f = as.factor) %>%
+  as.data.frame()
+
+modelo_randforest2 <- randomForest(formula = Compl_Sang_Todos ~ . , data = base_imp, mtry = 5,
+                                  importance = TRUE, ntree = 1000)
+
+importancia2 <- as.data.frame(modelo_randforest2$importance)
+importancia2 <- rownames_to_column(importancia2, var = "variable")
+importancia2 <- rename.variable(importancia2, "%IncMSE", "MeanDecreaseAccuracy")
+importancia2 <- rename.variable(importancia2, "IncNodePurity", "MeanDecreaseGini")
+
+
+p1_2 <- ggplot (data = importancia2, aes ( x = reorder (variable, MeanDecreaseAccuracy), 
+                                        y = MeanDecreaseAccuracy,
+                                        fill = MeanDecreaseAccuracy)) + 
+  labs (x = "variable", title = "Reduccion de Accuracy") +
+  geom_col () +
+  coord_flip () +
+  theme_bw () + 
+  theme(legend.position = "bottom")
+
+p1_2
+
+```
+
+> Se observan que las variables con mayor importancia son: ClCr, Edad, Hemoglobina, Peso, FC, PSAP, Plaquetas, Cirugía previa (Pac_Cx_Total), Saturación O2 y GB. 
+
+### b) Lasso con todas las variables
+
+>* Se decide realizar Lasso como tercera y úlitma forma de selección de variables.
+
+```{r}
+x_2 <- model.matrix(Compl_Sang_Todos ~., base_imp)
+y_2 <- base_imp$Compl_Sang_Todos
+
+vis_miss(base_imp)
+
+dim(x_2) #hay mas variables porque hace dummies de las categoricas ; )
+lasso_m2 <- glmnet(x_2, y=as.factor(y_2),  alpha=1, family="binomial", lambda = NULL)
+
+plot(lasso_m2,xvar="lambda",label=TRUE)
+plot(lasso_m2,xvar="norm",label=TRUE)
+
+set.seed(1)
+lasso_m2_cv <-  cv.glmnet(x_2, y=as.factor(y_2),  alpha=1, family="binomial", nfolds=10)
+
+# guardar los lambdas
+min_lambda_lasso_m2_cv <- lasso_m2_cv$lambda.min
+best_lambda_lasso_m2_cv <- lasso_m2_cv$lambda.1se
+
+plot(lasso_m2_cv)
+abline(v=log(min_lambda_lasso_m2_cv), col="blue")
+abline(v=log(best_lambda_lasso_m2_cv), col="orange")
+
+#### se calculan los coeficientes para el lambda seleccionado
+vars_lambda_best <- predict(lasso_m2_cv, type="coefficients", s=best_lambda_lasso_m2_cv)
+vars_lambda_min <- predict(lasso_m2_cv, type="coefficients", s=min_lambda_lasso_m2_cv)
+
+lasso_m3 <- glmnet(x_2, y=as.factor(y_2),  alpha=1, family="binomial", lambda = min_lambda_lasso_m2_cv)
+coef(lasso_m3)
+
+```
+
+> Las variaboes significativas son: ACV, Hemorragia Mayor Previa, FC, TAS, Saturación O2, Cirugía previa, Hb, GB, Biomarcadores y TAPSE. 
+
+# *MODELOS DE REGRESIÓN*
+## 8) **Analisis multivariado con base imputada con Cross Validation con método "Leave one out"**
+
+### a) Modelo de regresión logística con variables seleccionadas por analisis univariado
+
+```{r}
+
+base_validation <- base_backup
+base_validation$CC_FR_Ingreso_Terc <- base_sens$CC_FR_Ingreso_Terc
+base_validation$Log_Lab_GB_Terc <- base_sens$Log_Lab_GB_Terc
+base_validation$Log_TAS_Terc <- base_sens$Log_TAS_Terc
+base_validation$Log_FC_Terc  <- base_sens$Log_FC_Terc
+
+base_validation$sangrado_recod <- base_imp$Compl_Sang_Todos
+base_validation$sangrado_recod <- as.factor(base_validation$sangrado_recod)
+
+base_validation$Lab_Plaq_Corte <- ifelse (base_validation$Lab_Plaq <= 100000, 1, 0)
+base_validation$Pac_Edad_Corte <- ifelse (base_validation$Pac_Edad >= 75, 1, 0)
+
+base_validation1 <- base_validation
+base_validation11 <- base_validation
+
+library(caret)
+
+fitControl <- trainControl(
+  method = "LOOCV", #leave one out cross validation
+  classProbs = T,
+  summaryFunction = twoClassSummary )
+
+
+LOOCV_m7 = train(
+  form = sangrado_recod ~ Pac_ACVglobal + Pac_Hemorragia_Previa_Mayor_Todas + Pac_IRCglobal + Pac_Cx_Total + ECOTT_DisfVD + Lab_Hb + Log_Lab_GB_Terc + Log_TAS_Terc + Log_FC_Terc,
+  data = base_validation11,
+  trControl = fitControl,
+  method = "glm",
+  family = "binomial",
+  metric = "ROC")
+
+LOOCV_m7$pred
+LOOCV_m7$results  #salen al reves sensibilidad y especificidad
+LOOCV_m7$pred
+
+# calculamos todas las metricas
+roc_LOOCV_m7<- roc(base_validation1$sangrado_recod ~ LOOCV_m7$pred[ , 4], auc=TRUE, ci=TRUE, plot=FALSE)
+
+Rta_predicha_LOOCV_m7 <- ifelse(LOOCV_m7$pred[,4]>0.3, 1, 0)
+
+table(base_validation1$sangrado_recod , Rta_predicha_LOOCV_m7)
+
+table(base_imp$Compl_Sang_Todos, Rta_predicha_LOOCV_m7)
+Rta_predicha_LOOCV_m7 <- as.factor(Rta_predicha_LOOCV_m7)
+levels(Rta_predicha_LOOCV_m7) <- c("No", "Si")
+base_imp$Compl_Sang_Todos <- as.factor(base_imp$Compl_Sang_Todos)
+levels(base_imp$Compl_Sang_Todos) <- c("No", "Si")
+table(base_imp$Compl_Sang_Todos, Rta_predicha_LOOCV_m7)
+
+LOOCV_m7_sensibilidad <- caret::sensitivity(base_imp$Compl_Sang_Todos , Rta_predicha_LOOCV_m7, positive="Si", negative = "No")
+LOOCV_m7_especificidad <- caret::specificity(base_imp$Compl_Sang_Todos , Rta_predicha_LOOCV_m7, positive="Si", negative = "No")
+LOOCV_m7_AUCROC <- roc_LOOCV_m7$auc
+LOOCV_m7_accuracy <- mean(base_imp$Compl_Sang_Todos == Rta_predicha_LOOCV_m7)
+LOOCV_m7_precision <- caret::precision(base_imp$Compl_Sang_Todos,Rta_predicha_LOOCV_m7)
+LOOCV_m7_VPN <- caret::negPredValue(base_imp$Compl_Sang_Todos,Rta_predicha_LOOCV_m7)
+LOOCV_m7_TFP <- 1-LOOCV_m7_especificidad
+
+plot(LOOCV_m7$finalModel)
+
+```
+
+### b) Modelo de regresión logistica en base a selección de variables con método de Lasso
+> Utilizamos las variables cuantitativas que cumplen con criterio de linealidad de logits
+En el caso de las variables FC, TAS, SatO2 y GB usamos las variables transformadas.
+
+```{r}
+
+base_validation$CC_FR_Ingreso_Terc <- base_sens$CC_FR_Ingreso_Terc
+base_validation$Log_Lab_GB_Terc <- base_sens$Log_Lab_GB_Terc
+base_validation$Log_TAS_Terc <- base_sens$Log_TAS_Terc
+base_validation$Log_FC_Terc  <- base_sens$Log_FC_Terc
+base_validation$Log_CC_SaO_Ingreso <- base_logit2$Log_CC_SaO_Ingreso
+
+base_validation2 <- base_validation
+
+fitControl <- trainControl(
+  method = "LOOCV", #leave one out cross validation
+  classProbs = T,
+  summaryFunction = twoClassSummary )
+
+
+LOOCV_m6= train(
+  form = sangrado_recod ~ Pac_ACVglobal + Pac_Hemorragia_Previa_Mayor_Todas + Biomarc_pos + Lab_Hb + Log_Lab_GB_Terc + ECOTT_TAPSE + Log_FC_Terc + Log_TAS_Terc + Log_CC_SaO_Ingreso + Pac_Cx_Total,
+  data = base_validation2,
+  trControl = fitControl,
+  method = "glm",
+  family = "binomial",
+  metric = "ROC"
+)
+
+# La métrica por defecto es accuracy. Se pueden setear otras como ROC y se pueden crear las propias
+# Como aca no estamos tuneando ningun parametro, podemos usar las propabilidades predichas finales del LOOCV
+# Con las probabilidades predichas podemos hacer lo que nos venga mejor
+# Si usamos otros algoritmos/metodos durante el proceso de train se ajustan parametros iterativamente y ahi la métrica que
+# se pone (aca "ROC") tiene mas peso.
+
+# Para ver el resultado solo basta con poner el nombre del objeto
+
+LOOCV_m6
+LOOCV_m6$results
+LOOCV_m6$pred
+# aca como elegimos LOOCV hay un valor predicho para cada uno, si elegimos k-fold-CV el resultado es un medida con su SD
+
+# ahora calculamos todas las metricas
+
+roc_LOOCV_m6<- roc(base_validation2$sangrado_recod  ~ LOOCV_m6$pred[,4], auc=TRUE, ci=TRUE, plot=FALSE)
+
+Rta_predicha_LOOCV_m6 <- ifelse(LOOCV_m6$pred[,4]>0.3, 1, 0)
+
+table(base_imp$Compl_Sang_Todos, Rta_predicha_LOOCV_m6)
+Rta_predicha_LOOCV_m6 <- as.factor(Rta_predicha_LOOCV_m6)
+levels(Rta_predicha_LOOCV_m6) <- c("No", "Si")
+base_imp$Compl_Sang_Todos <- as.factor(base_imp$Compl_Sang_Todos)
+levels(base_imp$Compl_Sang_Todos) <- c("No", "Si")
+table(base_imp$Compl_Sang_Todos, Rta_predicha_LOOCV_m6)
+
+LOOCV_m6_sensibilidad <- caret::sensitivity(base_imp$Compl_Sang_Todos , Rta_predicha_LOOCV_m6, positive="Si", negative = "No")
+LOOCV_m6_especificidad <- caret::specificity(base_imp$Compl_Sang_Todos , Rta_predicha_LOOCV_m6, positive="Si", negative = "No")
+LOOCV_m6_AUCROC <- roc_LOOCV_m6$auc
+LOOCV_m6_accuracy <- mean(base_imp$Compl_Sang_Todos == Rta_predicha_LOOCV_m6)
+LOOCV_m6_precision <- caret::precision(base_imp$Compl_Sang_Todos,Rta_predicha_LOOCV_m6)
+LOOCV_m6_VPN <- caret::negPredValue(base_imp$Compl_Sang_Todos,Rta_predicha_LOOCV_m6)
+LOOCV_m6_TFP <- 1-LOOCV_m6_especificidad
+plot(LOOCV_m6$finalModel)
+
+
+
+```
+
+### c) Modelo de regresión logistica en base a Random Forest
+> Utilizamos las variables cuantitativas que cumplen con criterio de linealidad de logits
+En el caso de las variables FC, TAS, SatO2 y GB usamos las variables transformadas.
+
+```{r}
+base_validation$CC_FR_Ingreso_Terc <- base_sens$CC_FR_Ingreso_Terc
+base_validation$Log_Lab_GB_Terc <- base_sens$Log_Lab_GB_Terc
+base_validation$Log_TAS_Terc <- base_sens$Log_TAS_Terc
+base_validation$Log_FC_Terc  <- base_sens$Log_FC_Terc
+base_validation$Log_CC_SaO_Ingreso <- base_logit2$Log_CC_SaO_Ingreso
+
+base_validation3 <- base_validation
+
+LOOCV_m9rf = train(
+  form = sangrado_recod ~ Lab_Hb + Log_FC_Terc + ECOTT_PSAP + Log_TAS_Terc + Pac_Cx_Total + Log_CC_SaO_Ingreso + Log_Lab_GB_Terc,
+  data = base_validation3,
+  trControl = fitControl,
+  method = "glm",
+  family = "binomial",
+  metric = "ROC"
+)
+
+# nuevamente extraemos las probabilidades y calculamos las metricas
+
+roc_LOOCV_m9rf<- roc(base_validation3$sangrado_recod  ~ LOOCV_m9rf$pred[,4], auc=TRUE, ci=TRUE, plot=FALSE)
+
+Rta_predicha_LOOCV_m9rf <- ifelse(LOOCV_m9rf$pred[,4]>0.3, 1, 0)
+#Rta_predicha_LOOCV_m9rf <- as.factor(Rta_predicha_LOOCV_m9rf)
+
+table(base_imp$Compl_Sang_Todos, Rta_predicha_LOOCV_m9rf)
+Rta_predicha_LOOCV_m9rf <- as.factor(Rta_predicha_LOOCV_m9rf)
+levels(Rta_predicha_LOOCV_m9rf) <- c("No", "Si")
+base_imp$Compl_Sang_Todos <- as.factor(base_imp$Compl_Sang_Todos)
+levels(base_imp$Compl_Sang_Todos) <- c("No", "Si")
+table(base_imp$Compl_Sang_Todos, Rta_predicha_LOOCV_m9rf)
+
+LOOCV_m9rf_sensibilidad <- caret::sensitivity(base_imp$Compl_Sang_Todos , Rta_predicha_LOOCV_m9rf, positive="Si", negative = "No")
+LOOCV_m9rf_especificidad <- caret::specificity(base_imp$Compl_Sang_Todos , Rta_predicha_LOOCV_m9rf, positive="Si", negative = "No")
+LOOCV_m9rf_AUCROC <- roc_LOOCV_m9rf$auc
+LOOCV_m9rf_accuracy <- mean(base_imp$Compl_Sang_Todos == Rta_predicha_LOOCV_m9rf)
+LOOCV_m9rf_precision <- caret::precision(base_imp$Compl_Sang_Todos,Rta_predicha_LOOCV_m9rf)
+LOOCV_m9rf_VPN <- caret::negPredValue(base_imp$Compl_Sang_Todos,Rta_predicha_LOOCV_m9rf)
+LOOCV_m9rf_TFP <- 1-LOOCV_m9rf_especificidad
+
+plot(LOOCV_m9rf$finalModel)
+
+```
+
+### d) Modelo de regresión logística utilizando variables de Random Forest, Lasso, Univariado y otras variables apoyadas por la bibliografía
+
+> En este caso utilizaremos Edad >75 años y Plaquetas <100.000 como punto de corte
+
+```{r}
+base_validation$CC_FR_Ingreso_Terc <- base_sens$CC_FR_Ingreso_Terc
+base_validation$Log_Lab_GB_Terc <- base_sens$Log_Lab_GB_Terc
+base_validation$Log_TAS_Terc <- base_sens$Log_TAS_Terc
+base_validation$Log_FC_Terc  <- base_sens$Log_FC_Terc
+base_validation$Log_CC_SaO_Ingreso <- base_logit2$Log_CC_SaO_Ingreso
+
+base_validation4 <- base_validation
+
+LOOCV_m8= train(
+  form = sangrado_recod ~ Pac_IRCglobal  + Pac_Edad_Corte + Lab_Plaq_Corte + Pac_Hemorragia_Previa_Mayor_Reciente + Pac_Cx_Total + Lab_Hb,
+  data = base_validation4,
+  trControl = fitControl,
+  method = "glm",
+  family = "binomial",
+  metric = "ROC"
+)
+
+LOOCV_m8
+LOOCV_m8$results  #salen al reves sensibilidad y especificidad
+LOOCV_m8$pred
+
+# calculamos todas las metricas
+
+roc_LOOCV_m8<- roc(base_validation4$sangrado_recod  ~ LOOCV_m8$pred[,4], auc=TRUE, ci=TRUE, plot=FALSE)
+
+Rta_predicha_LOOCV_m8 <- ifelse(LOOCV_m8$pred[,4]>0.3, 1, 0)
+
+table(base_imp$Compl_Sang_Todos, Rta_predicha_LOOCV_m8)
+Rta_predicha_LOOCV_m8 <- as.factor(Rta_predicha_LOOCV_m8)
+levels(Rta_predicha_LOOCV_m8) <- c("No", "Si")
+base_imp$Compl_Sang_Todos <- as.factor(base_imp$Compl_Sang_Todos)
+levels(base_imp$Compl_Sang_Todos) <- c("No", "Si")
+table(base_imp$Compl_Sang_Todos, Rta_predicha_LOOCV_m8)
+
+LOOCV_m8_sensibilidad <- caret::sensitivity(base_imp$Compl_Sang_Todos , Rta_predicha_LOOCV_m8, positive="Si", negative = "No")
+LOOCV_m8_especificidad <- caret::specificity(base_imp$Compl_Sang_Todos , Rta_predicha_LOOCV_m8, positive="Si", negative = "No")
+LOOCV_m8_AUCROC <- roc_LOOCV_m8$auc
+LOOCV_m8_accuracy <- mean(base_imp$Compl_Sang_Todos == Rta_predicha_LOOCV_m8)
+LOOCV_m8_precision <- caret::precision(base_imp$Compl_Sang_Todos,Rta_predicha_LOOCV_m8)
+LOOCV_m8_VPN <- caret::negPredValue(base_imp$Compl_Sang_Todos,Rta_predicha_LOOCV_m8)
+LOOCV_m8_TFP <- 1-LOOCV_m8_especificidad
+
+
+plot(LOOCV_m8$finalModel)
+
+
+```
+
+
+### e) Modelo aditivo generalizado: GAM
+>En este modelo intentaremos incluir Edad, Plaquetas y ClCr que no cumplen con linealidad de logits.
+Además intentaremos modelar las variables sin transformar de GB y TAS, FC y SatO2 y FR. 
+
+#### i) Exploración de las variables no lineales
+```{r}
+base_gam <- base_backup
+
+library(gamlss)
+library(ggpubr)
+library(skimr)
+
+ggplot(data = base_gam, aes(x = Lab_Hb)) +
+  geom_density(alpha = 0.5, fill = "gray50") +
+  geom_rug(alpha = 0.2) +
+  labs(title = "Distribución de Hb") +
+  theme_bw()
+
+ggplot(data = base_gam, aes(x = ClCr)) +
+  geom_density(alpha = 0.5, fill = "gray50") +
+  geom_rug(alpha = 0.2) +
+  labs(title = "Distribución de ClCr") +
+  theme_bw()
+
+ggplot(data = base_gam, aes(x = Lab_Plaq)) +
+  geom_density(alpha = 0.5, fill = "gray50") +
+  geom_rug(alpha = 0.2) +
+  labs(title = "Distribución de Plaq") +
+  theme_bw()
+
+ggplot(data = base_gam, aes(x = Lab_GB)) +
+  geom_density(alpha = 0.5, fill = "gray50") +
+  geom_rug(alpha = 0.2) +
+  labs(title = "Distribución de GB") +
+  theme_bw()
+
+ggplot(data = base_gam, aes(x = Pac_Edad)) +
+  geom_density(alpha = 0.5, fill = "gray50") +
+  geom_rug(alpha = 0.2) +
+  labs(title = "Distribución de Edad") +
+  theme_bw()
+
+#Modelo básico de regresión logistica, sin smooths, para poder comparar después
+base_gam$Compl_Sang_Todos <- as.integer(base_gam$Compl_Sang_Todos) -1 
+modelo_glm <- gamlss(
+              formula = Compl_Sang_Todos ~  CC_TAS_Ingreso + (ClCr) + (Lab_Hb) + Lab_Plaq + Pac_Edad + CC_SaO_Ingreso + CC_FC_Ingreso + Lab_GB,
+              family  = BI(mu.link = "logit"),
+              data    = base_gam,
+              trace   = FALSE
+             )
+summary(modelo_glm)
+plot(modelo_glm)
+wp(modelo_glm, ylim.all = 1)
+
+
+#Exploracion de otras distribuciones que ajusten mejor
+base_binom <- base_gam[,names(base_gam) %in% c("Compl_Sang_Todos", "Biomarc_pos" , "ECOTT_DisfVD", "ClCr", "Lab_Hb", "Lab_GB", "Pac_Edad", "CC_FC_Ingreso", "CC_TAS_Ingreso", "CC_SaO_Ingreso", "Pac_ACVglobal", "Pac_Cx_Total", "Pac_Hemorragia_Previa_Mayor_Todas")]
+
+distribuciones <- fitDist(
+                    base_binom$Compl_Sang_Todos,
+                    k = 2, # esta penalización equivale al AIC
+                    type = "binom",
+                    trace = FALSE,
+                    try.gamlss = TRUE
+                  )
+distribuciones$fits %>%
+  enframe(name = "distribucion", value = "GAIC") %>%
+  arrange(GAIC)
+distribuciones
+#Se explorò con otras distribuciones: BB, DBI, NBI, NBII. Por AIC el mejor modelo es con BI. 
+
+#Aplicar smoothing a las variables continuas
+
+#P-Splines (Penalized Smoothing Splines) a los predictores continuos del modelo. Esta función emplea el método de local maximum likelihood para seleccionar automáticamente los grados de libertad efectivos óptimos (flexibilidad).
+modelo_glm2 <- gamlss(
+              formula = Compl_Sang_Todos ~  pb(CC_TAS_Ingreso) + pb(ClCr) + pb(Lab_Hb) + pb(Lab_Plaq) + pb(Pac_Edad) + pb(CC_SaO_Ingreso) + pb(CC_FC_Ingreso) + pb(Lab_GB),
+              family  = BI(mu.link = "logit"),
+              data    = base_gam,
+              trace   = FALSE
+             )
+summary(modelo_glm2)
+plot(modelo_glm2)
+wp(modelo_glm2, ylim.all = 1)
+
+#La función cs() permite incorporar Cubic Splines a los predictores continuos del modelo. A diferencia de pb(), en este caso sí es necesario especificar los grados de libertad.
+modelo_glm4 <- gamlss(
+              formula = Compl_Sang_Todos ~   cs(CC_TAS_Ingreso, df = 2) + cs(ClCr, df = 2) + cs(Lab_Hb, df = 2) + cs(Lab_Plaq, df = 2) + cs(Pac_Edad, df = 2) + cs(CC_SaO_Ingreso, df = 2) + cs(CC_FC_Ingreso, df = 2) + cs(Lab_GB, df = 2),
+              family  = BI(mu.link = "logit"),
+              data    = base_gam,
+              trace   = FALSE
+             )
+summary(modelo_glm4)
+plot(modelo_glm4)
+wp(modelo_glm4, ylim.all = 1)
+
+
+#Hay métodos con redes neuronales para smoothing pero preferimos no meternos en ese territorio
+
+###SELECCION DEL MEJOR MODELO###
+GAIC(modelo_glm, modelo_glm2,modelo_glm4)
+#La mejor función smooth es con GLM2, es decir con P-splines Penalized Smoothing Splines.
+
+#Ahora sacamos las variables que no son significativas y exploramos incluyendo las categóricas:
+modelo_glm2_1 <- gamlss(
+              formula = Compl_Sang_Todos ~  pb(ClCr) + pb(Lab_Hb) + pb(Lab_Plaq) + pb(CC_FC_Ingreso) + pb(Lab_GB),
+              family  = BI(mu.link = "logit"),
+              data    = base_gam,
+              trace   = FALSE
+             )
+summary(modelo_glm2_1)
+plot(modelo_glm2_1)
+wp(modelo_glm2_1, ylim.all = 1)
+
+modelo_glm2_2 <- gamlss(
+              formula = Compl_Sang_Todos ~  pb(CC_FC_Ingreso) + pb(Lab_Hb) + Biomarc_pos + ECOTT_DisfVD  + pb(ClCr) + Pac_ACVglobal,
+              family  = BI(mu.link = "logit"),
+              data    = base_gam,
+              trace   = FALSE
+             )
+summary(modelo_glm2_2)
+plot(modelo_glm2_2)
+wp(modelo_glm2_2, ylim.all = 1)
+
+modelo_glm2_3 <- gamlss(
+              formula = Compl_Sang_Todos ~ pb(Lab_Hb) + Biomarc_pos + ECOTT_DisfVD  +  Pac_Edad_Corte + Pac_ACVglobal,
+              family  = BI(mu.link = "logit"),
+              data    = base_gam,
+              trace   = FALSE
+             )
+summary(modelo_glm2_3)
+plot(modelo_glm2_3)
+wp(modelo_glm2_3, ylim.all = 1)
+
+###SELECCION DEL MEJOR MODELO###
+GAIC(modelo_glm2_1, modelo_glm2_2,modelo_glm2_3)
+
+#El mejor modelo es: modelo_glm2_3
+
+#Cuando se incorpora en algún predictor de un modelo aditivo (GAM o GAMLSS) una función smooth, el coeficiente de regresión y su error estimado no se pueden interpretar de la forma convencional, ya que estos solo contemplan la aportación lineal, ignorando la no lineal. La mejor forma de interpretar el impacto de una función smooth no lineal es mediante:
+
+#Gráficos de dependencia parcial, que muestran el impacto en las predicciones del modelo a medida que varía el valor de un predictor y se mantienen constantes los otros.
+
+#getPEF(   #no se puede porque solamente hay 1 variable continua
+#  modelo_glm2_3,
+#  term      = "Lab_Hb",
+#  parameter = "mu",
+#  plot      = TRUE
+#)
+
+#Reajustar el modelo excluyendo el predictor de interés y evaluar el impacto que tiene sobre el modelo. drop1()
+drop <- drop1(object = modelo_glm2_3, parallel = "multicore", ncpus = 4)
+drop
+
+```
+>Como conclusión vemos que probando con estos modelos aditivos no obtenemos resultados significativos para Plaquetas, Edad, ni Clearence de Creatinina. 
+
+#### ii) Modelo GAM con cross validation
+```{r}
+#cross validation con método Leave one Out y GAM
+#no se puede utilizar la libreria GAMLSS ya que tiene un error interno en el código al hacer CV con VR binomial
+#dejo el script para futuros intentos
+#modelo_glm2_cv <- gamlssCV(formula = Compl_Sang_Todos ~ Biomarc_pos + ECOTT_DisfVD  + pb(ClCr) + pb(Lab_Hb) + (Pac_Edad_Corte) + Pac_ACVglobal,
+#                           family  = BI,
+#                           data    = base_gam,
+#                           K.fold = 10, parallel = "multicore", ncpus = 4,
+#                           set.seed = 1)
+
+#el CV con caret no permite seleccionar el tipo de smoothing de la variable, elige el smoothing que mejor se adapta a los datos de forma automática.
+
+library(mgcv)
+library(caret)
+
+base_gam$Compl_Sang_Todos <- as.factor(base_gam$Compl_Sang_Todos)
+levels(base_gam$Compl_Sang_Todos) <- c("No", "Si")
+
+set.seed(0)
+
+LOOCV_m11 <- train(Compl_Sang_Todos ~ Biomarc_pos + ECOTT_DisfVD + Lab_Hb + Pac_Edad_Corte + Pac_ACVglobal, 
+        data = base_gam,
+        method = "gam",
+        trControl = trainControl(method = "LOOCV", number = 1, classProbs = T, summaryFunction = twoClassSummary),
+        tuneGrid = data.frame(method = "GCV.Cp", select = FALSE),
+        family = "binomial", metric = "ROC"
+)
+
+summary(LOOCV_m11)
+
+#Calculo metricas con regresion logistica con smoothing de modelo con cross validation
+
+LOOCV_m11$pred
+
+roc_LOOCV_m11<- roc(base_gam$Compl_Sang_Todos ~ LOOCV_m11$pred[,4], auc=TRUE, ci=TRUE, plot=TRUE)
+plot(roc_LOOCV_m11)
+
+Rta_predicha_LOOCV_m11 <- ifelse(fv(modelo_glm2)>0.3, 1, 0)
+
+table(base_gam$Compl_Sang_Todos, Rta_predicha_LOOCV_m11)
+Rta_predicha_LOOCV_m11 <- as.factor(Rta_predicha_LOOCV_m11)
+levels(Rta_predicha_LOOCV_m11) <- c("No", "Si")
+base_gam$Compl_Sang_Todos <- as.factor(base_gam$Compl_Sang_Todos)
+levels(base_gam$Compl_Sang_Todos) <- c("No", "Si")
+summary(base_gam$Compl_Sang_Todos)
+table(base_gam$Compl_Sang_Todos, Rta_predicha_LOOCV_m11)
+
+#Calculo de metricas
+library(caret)
+LOOCV_m11_sensibilidad <- caret::sensitivity(base_gam$Compl_Sang_Todos , Rta_predicha_LOOCV_m11, positive="Si", negative = "No")
+LOOCV_m11_especificidad <- caret::specificity(base_gam$Compl_Sang_Todos , Rta_predicha_LOOCV_m11, positive="Si", negative = "No")
+LOOCV_m11_AUCROC <- roc_LOOCV_m11$auc
+LOOCV_m11_accuracy <- mean(base_gam$Compl_Sang_Todos == Rta_predicha_LOOCV_m11)
+LOOCV_m11_precision <- caret::precision(base_gam$Compl_Sang_Todos,Rta_predicha_LOOCV_m11)
+LOOCV_m11_VPN <- caret::negPredValue(base_gam$Compl_Sang_Todos,Rta_predicha_LOOCV_m11)
+LOOCV_m11_TFP <- 1-LOOCV_m11_especificidad
+
+plot(LOOCV_m11$finalModel)
+
+
+```
+> Resumiendo: Utilizamos la libreria GAMLSS y buscamos la mejor distribución entre las distintas binomiales para mi modelo. A posterior comparamos la regresión logística común con métodos de regresión que ajustan y modelan las variables cuantitativas que no respetan la linealidad de los logits, como es el caso de Plaquetas y Clearence de Creatinina.
+
+>El mejor modelo en base al AIC es el GLM2, es decir el modelo que utiliza P-splines Penalized Smoothing Splines. A modo exploratorio realizamos las métricas con este modelo, y luego realizamos con la libreria caret el mismo modelo utilizando cross-validation con k-fold = 10 (intentamos realizar cross validation con el paquete GAMLSS pero creemos que hay un problema con la librería al realizar cross validation de modelos binomiales)
+Con ese modelo con cross validation (modelo 11) realizamos las métricas y ahora seleccionaremos el mejor modelo en la próxima sección. 
+
+## 9) **Métricas de perfomance de modelos GAM y logísticos**
+```{r}
+
+modelos <- c("Por analisis univariado", "Por Lasso", "Por Random Forest", "Por Lasso + RF + Univ", "GAM con CV")
+Sensibilidad <- c(LOOCV_m6_sensibilidad, LOOCV_m7_sensibilidad, LOOCV_m8_sensibilidad, LOOCV_m9rf_sensibilidad,LOOCV_m11_sensibilidad)
+Especificidad <- c(LOOCV_m6_especificidad, LOOCV_m7_especificidad, LOOCV_m8_especificidad, LOOCV_m9rf_especificidad, LOOCV_m11_especificidad)
+AUCROC <- c(LOOCV_m6_AUCROC, LOOCV_m7_AUCROC, LOOCV_m8_AUCROC, LOOCV_m9rf_AUCROC,LOOCV_m11_AUCROC )
+Accuracy <- c(LOOCV_m6_accuracy, LOOCV_m7_accuracy, LOOCV_m8_accuracy, LOOCV_m9rf_accuracy, LOOCV_m11_accuracy)
+Precision <- c(LOOCV_m6_precision, LOOCV_m7_precision, LOOCV_m8_precision, LOOCV_m9rf_precision,LOOCV_m11_precision)
+VPN <- c(LOOCV_m6_VPN, LOOCV_m7_VPN, LOOCV_m8_VPN, LOOCV_m9rf_VPN,LOOCV_m11_VPN)
+TFP <- c(LOOCV_m6_TFP, LOOCV_m7_TFP, LOOCV_m8_TFP, LOOCV_m9rf_TFP,LOOCV_m11_TFP)
+
+
+performance_modelos_LOOCV <- data.frame(modelos, Sensibilidad, Especificidad, AUCROC,
+                                        Accuracy, Precision,  VPN, TFP)
+
+plot_perf_model_LOOCV <- performance_modelos_LOOCV %>%
+  pivot_longer(cols = -modelos,
+               names_to = "Metricas",
+               values_to = "Valor"
+  )
+
+# creamos el plot
+
+ggplot()+
+  geom_point(data=plot_perf_model_LOOCV, aes(x=Metricas, y=Valor, color=modelos), size=3)+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# la comparacion final la podemos hacer con las AUCROC y sus IC
+
+IC_lower_95 <- c(roc_LOOCV_m6$ci[1], roc_LOOCV_m7$ci[1], roc_LOOCV_m8$ci[1], roc_LOOCV_m9rf$ci[1],roc_LOOCV_m11$ci[1] )
+IC_upper_95 <- c(roc_LOOCV_m6$ci[3], roc_LOOCV_m7$ci[3], roc_LOOCV_m8$ci[3], roc_LOOCV_m9rf$ci[3],roc_LOOCV_m11$ci[3])
+
+db_AUCROC_modelos <- as.data.frame(cbind(modelos, AUCROC, IC_lower_95, IC_upper_95))
+db_AUCROC_modelos
+# NO hay diferencia significativa, todos los IC 95% se superponen
+
+#Seleccion de modelo por AIC 
+
+mm6 <- extractAIC(LOOCV_m6$finalModel)#379
+mm7 <- extractAIC(LOOCV_m7$finalModel) #367
+mm8 <- extractAIC(LOOCV_m8$finalModel)#379
+mm9 <- extractAIC(LOOCV_m9rf$finalModel)#381
+mm11 <- extractAIC(LOOCV_m11$finalModel) #365
+AIC_finales <- c(mm6, mm7, mm8, mm8, mm11)
+AIC_finales
+#CONCLUSION: el modelo m11 es el que tiene mejor AUC, S y E y AIC y es el modelo elegido. 
+```
+> CONCLUSION: el modelo m11 es el que tiene mejor AUC, S y E y AIC y es el modelo elegido. 
+
+## 10) **Presentación de los datos finales**
+
+>.No es posible graficar en términos de Odds Ratio los modelos con función smooth utilizados con libreria caret.
+Por lo tanto incluimos las tablas resumen y graficos que validan nuestro modelo propuesto.
+>.Como conclusíón, en este registro de pacientes con tromboembolismo de pulmón, luego de realizar un modelo aditivo generalizado, se evidencia que las variables Hemoglobina, presencia de biomarcadores positivos, la presencia de disfunción ventricular derecha en el ecocardiograma, la edad > 75 años y el antecedente de ACV previo se asocian de forma significativa a la presencia de sangrado como complicación en la evolución intrahospitalaria y/o a 30 días de seguimiento ambulatorio.
+
+```{r}
+#No es posible graficar en términos de Odds Ratio los modelos con función smooth utilizados con libreria caret.
+#Por lo tanto incluimos las tablas resumen y graficos que validan nuestro modelo propuesto
+
+#drop test para ver significancia de cada variable en modelo elegido
+drop
+#grafico con variable Hb suavizada para el modelo elegido
+plot(LOOCV_m11$finalModel)
+#gráfico de residuos tipo worms para modelo GAM elegido
+library(gamlss)
+wp(modelo_glm2_3, ylim.all = 1)
+#curva ROC del modelo elegido
+library(pROC)
+pROC_obj <- pROC::roc(base_gam$Compl_Sang_Todos,LOOCV_m11$pred[,4],
+            smoothed = TRUE,
+            # arguments for ci
+            ci=TRUE, ci.alpha=0.9, stratified=FALSE,
+            # arguments for plot
+            plot=TRUE, auc.polygon=TRUE, max.auc.polygon=TRUE, grid=TRUE,
+            print.auc=TRUE, show.thres=TRUE)
+
+
+sens.ci <- ci.se(pROC_obj)
+plot(sens.ci, type="shape", col="lightblue")
+plot(sens.ci, type="bars")
+```
